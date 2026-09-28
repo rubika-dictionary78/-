@@ -7,7 +7,7 @@ import os
 from datetime import datetime
 
 # 🔑 توکن ربات خود را جایگزین کنید
-BOT_TOKEN = "CFEFFD0YVGEYNMEWIUSCAWZPSCHWVIEXIHRKSOJEMGDBHPZPOOIADEGBHTRSAHCI"
+ BOT_TOKEN = os.getenv("BOT_TOKEN")
 
 bot = Robot(token=BOT_TOKEN)
 
