@@ -1,12 +1,6 @@
 # -*- coding: utf-8 -*-
 """
 ربات دیکشنری پیشرفته روبیکا
-قابلیت‌ها:
-- ترجمه کلمات
-- پاسخ‌های چت (عاشقانه، دلبرانه، ناز دخترانه)
-- فیلتر فحش
-- تلفظ صوتی (TTS)
-- سیستم آموزش کلمات
 """
 
 import os
@@ -17,18 +11,18 @@ from rubka import Robot
 from rubka.context import Message
 
 # ==================================================
-# تنظیمات اولیه
+# تنظیمات
 # ==================================================
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-ALLOWED_GROUP_ID = int(os.getenv("ALLOWED_GROUP_ID", "0"))
+ALLOWED_GROUP_ID = int(os.getenv("ALLOWED_GROUP_ID") or "0")
 
 if not BOT_TOKEN:
-    raise ValueError("توکن ربات یافت نشد! BOT_TOKEN رو توی Railway تنظیم کن.")
+    raise ValueError("توکن ربات یافت نشد!")
 
 bot = Robot(token=BOT_TOKEN)
 
-# فایل‌ها
 WORDS_FILE = "words.json"
+RESPONSES_FILE = "responses.json"
 CHAT_FOLDER = "chat"
 LEARNED_FILE = "learned.json"
 
@@ -58,11 +52,14 @@ def save_json(filename, data):
         return False
 
 
+# ==================================================
 # لود دیتا
+# ==================================================
 WORDS = load_json(WORDS_FILE)
+RESPONSES = load_json(RESPONSES_FILE)
 LEARNED = load_json(LEARNED_FILE)
 
-# لود همه فایل‌های چت
+# لود همه فایل‌های پوشه chat
 CHAT_DATA = {}
 BAD_WORDS = []
 
@@ -77,6 +74,7 @@ if os.path.exists(CHAT_FOLDER):
                     CHAT_DATA[key] = value
 
 print(f"✅ {len(WORDS)} کلمه لود شد")
+print(f"✅ {len(RESPONSES)} پاسخ عمومی لود شد")
 print(f"✅ {len(CHAT_DATA)} دسته چت لود شد")
 print(f"✅ {len(BAD_WORDS)} کلمه ممنوعه لود شد")
 
@@ -103,9 +101,9 @@ def translate_api(word, source="en", target="fa"):
 def get_translation(word):
     word_lower = word.lower().strip()
     if word_lower in WORDS:
-        return WORDS[word_lower], "محلی"
+        return WORDS[word_lower], "دیکشنری محلی"
     if word_lower in LEARNED:
-        return LEARNED[word_lower], "یادگرفته"
+        return LEARNED[word_lower], "یادگرفته شده"
     result = translate_api(word_lower, "en", "fa")
     if result:
         return result, "API"
@@ -116,26 +114,9 @@ def get_translation(word):
 
 
 # ==================================================
-# تلفظ صوتی (TTS)
-# ==================================================
-def create_voice_file(text, lang="en"):
-    """ساخت فایل صوتی تلفظ کلمه"""
-    try:
-        from gtts import gTTS
-        tts = gTTS(text=text, lang=lang, slow=False)
-        filename = f"voice_{random.randint(1000, 9999)}.mp3"
-        tts.save(filename)
-        return filename
-    except Exception as e:
-        print(f"خطا در ساخت فایل صوتی: {e}")
-        return None
-
-
-# ==================================================
 # فیلتر فحش
 # ==================================================
 def contains_bad_word(text):
-    """بررسی وجود کلمات ممنوعه"""
     text_lower = text.lower()
     for word in BAD_WORDS:
         if word.lower() in text_lower:
@@ -144,20 +125,31 @@ def contains_bad_word(text):
 
 
 # ==================================================
-# پردازش پیام
+# پردازش پیام‌ها
 # ==================================================
 def handle_chat_response(message):
     text = message.text.strip()
     
-    # جستجو توی همه دسته‌ها
+    # جستجو در پاسخ‌های عمومی
+    if text in RESPONSES:
+        response_list = RESPONSES[text]
+        if isinstance(response_list, list):
+            response = random.choice(response_list)
+        else:
+            response = response_list
+        bot.send_message(message.chat.id, response)
+        return True
+    
+    # جستجو در پوشه chat
     for category, responses in CHAT_DATA.items():
-        if text in responses or text == category:
+        if text in category or text == category:
             if isinstance(responses, list):
                 response = random.choice(responses)
             else:
                 response = responses
             bot.send_message(message.chat.id, response)
             return True
+    
     return False
 
 
@@ -174,57 +166,18 @@ def handle_translation(message):
     return False
 
 
-def handle_voice_command(message):
-    """تلفظ صوتی کلمه: /voice hello"""
-    if not message.text.startswith("/voice"):
-        return False
-    
-    parts = message.text.split(maxsplit=1)
-    if len(parts) < 2:
-        bot.send_message(message.chat.id, "❌ فرمت: `/voice word`\nمثال: `/voice hello`")
-        return True
-    
-    word = parts[1].strip()
-    
-    # تشخیص زبان
-    persian_chars = set("آابپتثجچحخدذرزژسشصضطظعغفقکگلمنوهی")
-    lang = "fa" if any(c in persian_chars for c in word) else "en"
-    
-    bot.send_message(message.chat.id, f"🔊 در حال ساخت فایل صوتی برای: **{word}**")
-    
-    voice_file = create_voice_file(word, lang)
-    if voice_file:
-        try:
-            bot.send_voice(message.chat.id, voice_file)
-            os.remove(voice_file)
-        except Exception as e:
-            print(f"خطا در ارسال فایل صوتی: {e}")
-            bot.send_message(message.chat.id, "❌ ارسال فایل صوتی پشتیبانی نمیشه.")
-    else:
-        bot.send_message(message.chat.id, "❌ خطا در ساخت فایل صوتی.")
-    
-    return True
-
-
 def handle_learn_command(message):
     if not message.text.startswith("/learn"):
         return False
-    
     parts = message.text.split(maxsplit=2)
     if len(parts) < 3:
         bot.send_message(message.chat.id, "❌ فرمت: `/learn english معنی`")
         return True
-    
     english_word = parts[1].lower().strip()
     persian_meaning = parts[2].strip()
-    
     LEARNED[english_word] = persian_meaning
     save_json(LEARNED_FILE, LEARNED)
-    
-    bot.send_message(
-        message.chat.id,
-        f"✅ یاد گرفته شد!\n📖 **{english_word}** = **{persian_meaning}**"
-    )
+    bot.send_message(message.chat.id, f"✅ **{english_word}** = **{persian_meaning}**")
     return True
 
 
@@ -235,16 +188,19 @@ def handle_help_command(message):
     help_text = """📚 **راهنمای ربات**
 
 🔤 **ترجمه:** فقط کلمه رو بفرست
-
-🔊 **تلفظ صوتی:** `/voice hello`
-
 📝 **آموزش کلمه:** `/learn apple سیب`
-
 📊 **آمار:** `/stats`
 
-💕 **عاشقانه:** کلمه `عاشقانه` رو بفرست
-💋 **دلبرانه:** کلمه `دلبرانه` رو بفرست
-😘 **ناز دخترانه:** کلمه `ناز دخترانه` رو بفرست
+💕 **دسته‌های چت:**
+- عاشقانه
+- دلبرانه
+- ناز دخترانه
+- جوک
+- تبریک
+- تسلیت
+- تشکر
+- خانواده
+- کمک
 """
     bot.send_message(message.chat.id, help_text)
     return True
@@ -257,7 +213,8 @@ def handle_stats_command(message):
     stats_text = f"""📊 **آمار ربات:**
 
 📖 کلمات دیکشنری: **{len(WORDS)}**
-💬 دسته‌های چت: **{len(CHAT_DATA)}**
+💬 پاسخ‌های عمومی: **{len(RESPONSES)}**
+💕 دسته‌های چت: **{len(CHAT_DATA)}**
 🧠 کلمات یادگرفته: **{len(LEARNED)}**
 🚫 کلمات ممنوعه: **{len(BAD_WORDS)}**
 """
@@ -280,11 +237,11 @@ def handle_message(message: Message):
     
     text = message.text.strip()
     
-    # ۱. فیلتر فحش (اول از همه)
+    # ۱. فیلتر فحش
     if contains_bad_word(text):
         try:
             bot.delete_message(message.chat.id, message.id)
-            bot.send_message(message.chat.id, "🚫 این پیام حذف شد (کلمات نامناسب).")
+            bot.send_message(message.chat.id, "🚫 این پیام به دلیل کلمات نامناسب حذف شد.")
         except Exception as e:
             print(f"خطا در حذف پیام: {e}")
         return
@@ -295,8 +252,6 @@ def handle_message(message: Message):
     if handle_stats_command(message):
         return
     if handle_learn_command(message):
-        return
-    if handle_voice_command(message):
         return
     
     # ۳. پاسخ‌های چت
