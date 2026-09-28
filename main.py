@@ -226,7 +226,7 @@ def handle_stats_command(message):
 # هندلر اصلی
 # ==================================================
 @bot.on_message()
-def handle_message(message: Message):
+def handle_message(_bot, message: Message):
     
     # فقط گروه مجاز
     if ALLOWED_GROUP_ID != 0 and message.chat.id != ALLOWED_GROUP_ID:
