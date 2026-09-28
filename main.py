@@ -1,754 +1,316 @@
+# -*- coding: utf-8 -*-
+"""
+ربات دیکشنری پیشرفته روبیکا
+قابلیت‌ها:
+- ترجمه کلمات
+- پاسخ‌های چت (عاشقانه، دلبرانه، ناز دخترانه)
+- فیلتر فحش
+- تلفظ صوتی (TTS)
+- سیستم آموزش کلمات
+"""
+
+import os
+import json
+import random
+import requests
 from rubka import Robot
 from rubka.context import Message
-import random
-import time
-import json
-import os
-from datetime import datetime
 
-# 🔑 توکن ربات خود را جایگزین کنید
+# ==================================================
+# تنظیمات اولیه
+# ==================================================
 BOT_TOKEN = os.getenv("BOT_TOKEN")
+ALLOWED_GROUP_ID = int(os.getenv("ALLOWED_GROUP_ID", "0"))
+
+if not BOT_TOKEN:
+    raise ValueError("توکن ربات یافت نشد! BOT_TOKEN رو توی Railway تنظیم کن.")
 
 bot = Robot(token=BOT_TOKEN)
 
-# ========================================
-# 🧠 سیستم یادگیری از گروه
-# ========================================
-LEARN_FILE = "learned.json"
+# فایل‌ها
+WORDS_FILE = "words.json"
+CHAT_FOLDER = "chat"
+LEARNED_FILE = "learned.json"
 
-def load_learned():
-    """بارگذاری دیتای یادگرفته‌شده از فایل"""
-    if os.path.exists(LEARN_FILE):
+# ==================================================
+# توابع لود و ذخیره
+# ==================================================
+def load_json(filename, default=None):
+    if default is None:
+        default = {}
+    if os.path.exists(filename):
         try:
-            with open(LEARN_FILE, "r", encoding="utf-8") as f:
+            with open(filename, "r", encoding="utf-8") as f:
                 return json.load(f)
-        except:
-            return {}
-    return {}
-
-def save_learned(data):
-    """ذخیره دیتای یادگرفته‌شده در فایل"""
-    with open(LEARN_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-
-# دیکشنری یادگرفته‌ها (در حافظه)
-LEARNED = load_learned()
-
-# ========================================
-# 📚 دیکشنری پاسخ‌های آماده
-# ========================================
-RESPONSES = {
-    # --- سلام و احوال‌پرسی ---
-    "سلام": [
-        "سلام! چطور می‌تونم کمکت کنم؟ 👋",
-        "درود! چه خبر؟",
-        "سلام رفیق! 😊",
-        "سلام سلام! خوش اومدی 🌟",
-        "سلام! امروز چه خبر خوبی داری؟",
-        "درود بر تو! چه می‌کنی؟",
-    ],
-    "خوبی": [
-        "ممنون، خوبم! تو چطوری؟",
-        "خوبم، مرسی که پرسیدی 😄",
-        "عالیم! تو چطوری؟",
-        "بهترین حال ممکن! تو چه خبر؟",
-    ],
-    "چه خبر": [
-        "هیچی، همینجا نشستم منتظر تو! 😄",
-        "خبر خاصی نیست، تو بگو چه خبر؟",
-        "همه چیز آرومه، ممنون که پرسیدی!",
-        "خبر اینه که تو اومدی و خوشحالم کردی! 🌟",
-    ],
-    "خوبم": [
-        "خوشحالم که خوبی! 😊",
-        "چه عالی! انشاءالله همیشه خوب باشی.",
-        "مرسی که گفتی، خیالم راحت شد!",
-    ],
-    "بد نیستم": [
-        "خدا رو شکر! امیدوارم بهتر هم بشی.",
-        "بد نبودن هم یه نعمته! 😄",
-    ],
-    # --- اسم و معرفی ---
-    "اسمت چیه": [
-        "من ربات دستیار این گروه هستم! 🤖",
-        "اسم من رباته، ولی می‌تونی یه اسم برام بذاری 😁",
-        "من یه ربات ساده‌ام که اینجا چت می‌کنم!",
-    ],
-    "چیکار میکنی": [
-        "دارم با تو چت می‌کنم! 😄",
-        "همینجام، مراقب گروه!",
-        "دارم فکر می‌کنم چی بگم که خوشحال بشی! 🤔",
-    ],
-    "چند سالته": [
-        "من یه رباتم، سن ندارم! ولی همیشه جوونم 😎",
-        "سن من به ثانیه‌هاییه که روشنم!",
-    ],
-    "کجایی": [
-        "من توی سرورها زندگی می‌کنم! ☁️",
-        "همه جا هستم، هر جا که لازم باشه!",
-    ],
-    # --- تشکر و محبت ---
-    "ممنون": [
-        "خواهش می‌کنم! کاری نکردم 🙌",
-        "خواهش، وظیفه‌ست ✨",
-        "قابلی نداشت! 😊",
-        "خواهش می‌کنم، همیشه در خدمتم!",
-    ],
-    "مرسی": [
-        "خواهش می‌کنم! 🌹",
-        "کاری نکردم، قابل شما رو نداشت!",
-    ],
-    "دوستت دارم": [
-        "منم دوستت دارم! ❤️",
-        "چه لطفی! منم همینطور 😊",
-        "مرسی، تو هم فوق‌العاده‌ای! 🌟",
-    ],
-    "بوس": [
-        "😘😘",
-        "ای بابا، خجالت‌آوره! 😳",
-    ],
-    # --- خداحافظی ---
-    "خداحافظ": [
-        "بدرود! مواظب خودت باش 👋",
-        "فعلاً! بازم بیا چت کنیم 😊",
-        "خدانگهدار! روز خوبی داشته باشی 🌸",
-        "بای بای! منتظرتم 👋",
-    ],
-    "شب بخیر": [
-        "شب تو هم بخیر! خواب‌های خوب ببینی 🌙",
-        "شب بخیر! فردا ببینمت 😴",
-    ],
-    "روز بخیر": [
-        "روز تو هم بخیر! ☀️",
-        "روز خوبی داشته باشی! 🌞",
-    ],
-    # --- احساسات ---
-    "خستم": [
-        "آخی، یه کم استراحت کن! ☕",
-        "خستگی‌ات به در! یه چایی بخور 🍵",
-    ],
-    "گرسنه‌ام": [
-        "برو یه چیزی بخور! سلامتی مهمه 🍔",
-        "من که نمی‌تونم غذا بدم، ولی برو بخور! 😋",
-    ],
-    "ناراحتم": [
-        "چی شده؟ امیدوارم زودتر خوب بشی 🌷",
-        "ناراحت نباش، همه چیز درست می‌شه! ❤️",
-    ],
-    "خوشحالم": [
-        "چه عالی! خوشحالیت مسری‌ست 😄",
-        "خوشحالم که خوشحالی! 🌟",
-    ],
-    "عصبانی‌ام": [
-        "آروم باش، نفس عمیق بکش! 🧘",
-        "چی شده؟ یه کم آروم باش، حل می‌شه.",
-    ],
-    # --- سوالات عمومی ---
-    "ساعت چنده": [
-        "متأسفانه ساعت رو نمی‌دونم، ولی می‌تونم یه بازی پیشنهاد بدم! 🎮",
-        "ساعت رو نمی‌دونم، ولی وقتشه یه چت خوب کنیم! 😄",
-    ],
-    "تاریخ": [
-        "تاریخ رو نمی‌دونم، ولی امروز روز خوبیه! 📅",
-    ],
-    "هوا چطوره": [
-        "من به اینترنت دسترسی دارم ولی هوا رو نمی‌تونم ببینم! ☁️",
-        "هوا رو نمی‌دونم، ولی دل من آفتابیه! ☀️",
-    ],
-    "چیکار کنم": [
-        "یه چت با من بزن! 😄",
-        "برو یه آهنگ گوش کن، یا با دوستات حرف بزن!",
-        "یه کتاب بخون، یا یه بازی با من بکن! 🎮",
-    ],
-    "حوصلم سر رفته": [
-        "بیا با هم بازی کنیم! بنویس «بازی» 🎯",
-        "یه چت بزنیم، حوصله‌ات سر نمیره! 😊",
-        "برو یه فیلم ببین یا آهنگ گوش کن! 🎬",
-    ],
-    "بیکارم": [
-        "منم بیکارم، بیا چت کنیم! 😄",
-        "یه کار پیدا کن، یا با من حرف بزن!",
-    ],
-    # --- درخواست‌ها ---
-    "کمکم کن": [
-        "چی کمکی از دستم برمیاد؟ بگو! 🤝",
-        "در خدمتم، بگو چه کاری داری؟",
-    ],
-    "راهنما": [
-        "برای راهنما دستور /help رو بفرست! 📖",
-        "بنویس /help تا همه چیز رو بگم.",
-    ],
-    # --- جواب‌های طنز ---
-    "چطوری": [
-        "مثل همیشه، آماده چت! 😄",
-        "خوبم، تو چطوری؟",
-        "رو به راهم، مرسی!",
-    ],
-    "چی میخوری": [
-        "من برق می‌خورم! ⚡",
-        "من فقط داده می‌خورم، تو چی؟ 😋",
-    ],
-    "چی می‌پوشی": [
-        "من کد پوشیدم! 💻",
-        "لباس من بایت‌هاست! 😄",
-    ],
-    "ازدواج کردی": [
-        "من رباتم، ازدواج نمی‌کنم! 😄",
-        "نه بابا، من فقط با کدها ازدواج کردم! 💻",
-    ],
-    "عاشق شدی": [
-        "من عاشق همه کاربرامم! ❤️",
-        "عشق من به داده‌هاست! 😄",
-    ],
-    "خوابت میاد": [
-        "من هیچ‌وقت نمی‌خوابم، همیشه بیدارم! 😴❌",
-        "ربات‌ها خواب ندارن!",
-    ],
-    "چند تا دوست داری": [
-        "همه شما دوستام هستید! ❤️",
-        "دوستام به اندازه کاربرامه!",
-    ],
-    # --- پاسخ به کلمات رایج ---
-    "بله": ["آره دیگه! 😄", "درسته!", "موافقم!"],
-    "نه": ["باشه، هرجور راحتی.", "اوکی، مشکلی نیست.", "قبول!"],
-    "چرا": ["خب، چون منطقیه! 🤔", "چون اینطوریه دیگه! 😄", "سوال خوبیه، ولی جوابش پیچیده‌ست!"],
-    "چی": ["چی چی؟ 😄", "بگو ببینم چی می‌خوای؟", "چی شده؟"],
-    "کجا": ["هر جا که تو باشی! 😄", "اینجا، پیش تو!", "کجا؟ بگو ببینم!"],
-    "کی": ["همین حالا! 😄", "کی چی؟ بگو!", "وقتشه!"],
-    # --- تشویق ---
-    "آفرین": ["مرسی! تو هم عالی هستی! 🌟", "قابلی نداشت! 😊"],
-    "عالی": ["تو هم عالی هستی! 🌟", "مرسی، لطف داری! 😊"],
-    "قشنگ": ["چشمات قشنگ می‌بینه! 😄", "مرسی! 🌹"],
-    # --- جواب‌های کوتاه ---
-    "اوکی": ["اوکی! 👍", "باشه!", "قبول!"],
-    "باشه": ["باشه! 😊", "اوکی، قبوله!", "هر چی تو بگی!"],
-    "نه مرسی": ["باشه، هر وقت خواستی بگو! 😊", "اوکی، مشکلی نیست."],
-    # --- سوالات متفرقه ---
-    "چند تا کاربر داری": [
-        "به اندازه همه اعضای این گروه! 😄",
-        "همه شما کاربرام هستید! ❤️",
-    ],
-    "چیکار میکنی ربات": [
-        "دارم چت می‌کنم، تو چی؟ 😄",
-        "دارم به پیام‌هات جواب می‌دم! 🤖",
-    ],
-    "خسته نباشی": [
-        "مرسی، تو هم خسته نباشی! 💪",
-        "ممنون! ربات‌ها خسته نمی‌شن! 😄",
-    ],
-    "سلامت باشی": [
-        "مرسی، تو هم سلامت باشی! 🌹",
-        "ممنون، به سلامت! 😊",
-    ],
-}
-# ========================================
-# 📚 دیکشنری پاسخ‌های اضافی (دستی)
-# ========================================
-EXTRA_RESPONSES = {
-    "سلام عزیز": ["سلام عزیزم! خوش اومدی 🌟", "سلام عزیز دل! 😊"],
-    "سلام رفیق": ["سلام رفیق! چه خبر؟ 😄", "سلام رفیق گلم! 🌹"],
-    "درود": ["درود بر تو! 🌹", "درود! خوش اومدی 😊"],
-    "صبح بخیر": ["صبح تو هم بخیر! ☀️", "صبح بخیر! روز خوبی داشته باشی 🌞"],
-    "ظهر بخیر": ["ظهر تو هم بخیر! 🌞", "ظهر بخیر! 😊"],
-    "عصر بخیر": ["عصر تو هم بخیر! 🌇", "عصر بخیر! خسته نباشی 💪"],
-    "شب خوش": ["شب تو هم خوش! 🌙", "شب خوش! خواب خوب ببینی 😴"],
-    "روز بخیر": ["روز تو هم بخیر! 🌞", "روز خوبی داشته باشی ☀️"],
-    "تندرست باشی": ["مرسی، تو هم تندرست باشی! 💚", "ممنون، سلامت باشی 🌹"],
-    "محبت داری": ["مرسی، تو هم محبت داری! ❤️", "لطف داری! 🌹"],
-    "عذر میخوام": ["مهم نیست، فراموشش کن! 😊", "اشکالی نداره! 🙌"],
-    "برگشتم": ["خوش برگشتی! 😊", "خوش اومدی! 🌟"],
-    "شب خوش": ["شب تو هم خوش! 🌙", "شب خوش! خواب خوب ببینی 😴"],
-    "چه خبرا": ["سلامتی! تو چه خبرا؟ 😊", "خبر خاصی نیست، تو بگو! 🌹"],
-    "حالت چطوره": ["خوبم مرسی، تو چطوری؟ 😄", "خوبم، تو چطوری؟ 😊"],
-    "اوضاع چطوره": ["خوبه مرسی، تو چطوری؟ 😊", "رو به راهه، تو چطوری؟ 🌟"],
-    "همه چی خوبه": ["آره خدا رو شکر! 🙏", "آره، ممنون! 🌟"],
-    "همه چی آرومه": ["آره، ممنون! 🌟", "خدا رو شکر، آرومه! 😊"],
-    "چه روزی": ["امروز روز خوبیه! ☀️", "روز خوبیه، انشاءالله! 🌞"],
-    "چه هوایی": ["هوا خوبه، دل من آفتابیه! ☀️", "هوا رو نمی‌دونم، ولی دلم آفتابیه! 🌞"],
-    "چیکار کردی": ["هیچی، تو چیکار کردی؟ 😄", "همینجا بودم، تو چی؟ 😊"],
-    "کجا بودی": ["همینجا بودم، تو کجا بودی؟ 😊", "من همیشه اینجام! 😄"],
-    "کجا میری": ["جایی نمیرم، همینجام! 😄", "هیچ جا، پیش تو! 🌹"],
-    "کی میای": ["هر وقت تو بگی! 😄", "همین حالا اومدم! 😊"],
-    "کی میری": ["جایی نمیرم! 🌹", "هیچ جا نمیرم! 😊"],
-    "چرا نمیای": ["اومدم! 😄", "چرا نیام؟ اومدم! 😊"],
-    "چرا نمیگی": ["گفتم دیگه! 😊", "چی بگم؟ بگو! 🌹"],
-    "چرا نمیخندی": ["خندیدم! 😂", "خندیدم، ندیدی؟ 😄"],
-    "چرا ناراحتی": ["ناراحت نیستم، تو ناراحتی؟ 🌷", "ناراحت نیستم، خوشحالم! 😊"],
-    "چرا ساکتی": ["ساکت نیستم، دارم گوش می‌دم! 👂", "دارم فکر می‌کنم! 🤔"],
-    "چرا نمیخوابی": ["ربات‌ها خواب ندارن! 😴", "من همیشه بیدارم! ☀️"],
-    "چرا نمیخوری": ["من غذا نمی‌خورم! ⚡", "من برق می‌خورم! 💻"],
-    "چرا نمیای چت": ["اومدم دیگه! 😄", "همینجام، چت کنیم! 😊"],
-    "بیا چت": ["آره بیا! 😊", "بیا، در خدمتم! 🌹"],
-    "بیا حرف بزنیم": ["آره بیا! گوش می‌دم 👂", "بیا، حرف بزن! 😊"],
-    "بیا بازی کنیم": ["آره بیا! بنویس «بازی» 🎯", "بیا، بازی دوست داری؟ 🎮"],
-    "بیا دوست بشیم": ["آره بیا! من دوست همه‌ام ❤️", "بیا، دوستای من زیادن! 🌹"],
-    "با من دوست میشی": ["آره چرا که نه! 😊", "آره، من دوست همه‌ام! ❤️"],
-    "با من حرف میزنی": ["آره، در خدمتم! 🌹", "آره، بگو! 😊"],
-    "با من بازی میکنی": ["آره، بنویس «بازی» 🎮", "آره، بیا بازی! 🎯"],
-    "با من میخندی": ["آره! 😂", "آره، بخندیم! 😄"],
-    "با من میرقصی": ["آره، ولی من رباتم! 💃", "آره، بریم برقصیم! 🕺"],
-    "با من میخونی": ["آره! 🎤", "آره، بخون! 🎶"],
-    "با من میای": ["آره کجا؟ 😄", "آره، کجا بریم؟ 🌹"],
-    "تنهام": ["تنها نیستی، من هستم! ❤️", "من اینجام برات! 🌹"],
-    "بی کسم": ["من هستم برات! 🌹", "تو تنها نیستی، من هستم! ❤️"],
-    "دلم گرفته": ["چی شده؟ امیدوارم خوب بشی 🌷", "ناراحت نباش، همه چیز درست میشه! ❤️"],
-    "دلم تنگه": ["برای کی؟ من که همینجام! 😊", "ناراحت نباش، من هستم! ❤️"],
-    "دلتنگم": ["ناراحت نباش، من هستم! ❤️", "منم دلتنگتم! 🌹"],
-    "خوشحال نیستم": ["چرا؟ امیدوارم زودتر خوب بشی 🌷", "ناراحت نباش، خوب میشه! ❤️"],
-    "ناراحت نباش": ["ناراحت نیستم، ممنون! 😊", "مرسی، تو هم ناراحت نباش! 🌹"],
-    "گریه نکن": ["گریه نمی‌کنم، تو گریه نکن! 🌹", "باشه، نمی‌کنم! 😊"],
-    "بخند": ["😂😂😂", "باشه! 😄😄"],
-    "لبخند بزن": ["😊😊😊", "همیشه لبخند می‌زنم! 🌟"],
-    "شاد باش": ["تو هم شاد باش! 🌟", "مرسی، تو هم شاد باش! 😄"],
-    "خوش باش": ["تو هم خوش باش! 😄", "مرسی، تو هم خوش باش! 🌹"],
-    "سلامت باش": ["تو هم سلامت باش! 🌹", "مرسی، تو هم سلامت باش! 💚"],
-    "موفق باش": ["تو هم موفق باشی! 🏆", "مرسی، تو هم موفق باشی! 🌟"],
-    "پیروز باش": ["تو هم پیروز باشی! 🏆", "مرسی، تو هم پیروز باشی! 🌟"],
-    "سربلند باش": ["تو هم سربلند باشی! 🌟", "مرسی، تو هم سربلند باشی! 🌹"],
-    "عاقبت بخیر": ["تو هم عاقبت بخیر! 🙏", "مرسی، تو هم عاقبت بخیر! 🌹"],
-    "خوش عاقبت": ["تو هم خوش عاقبت! 🌹", "مرسی، تو هم خوش عاقبت! 🙏"],
-    "خداحافظت": ["خداحافظ! مواظب خودت باش 👋", "خداحافظ، به سلامت! 🌸"],
-    "به سلامت": ["به سلامت! 🌸", "خداحافظ، سلامت باشی! 🌹"],
-    "به امید دیدار": ["به امید دیدار! 👋", "باشه، به امید دیدار! 😊"],
-    "میبینمت": ["می‌بینمت! 😊", "باشه، می‌بینمت! 👋"],
-    "بعدا میبینمت": ["باشه، بعداً! 👋", "باشه، بعداً می‌بینمت! 😊"],
-    "فردا میبینمت": ["باشه، فردا! 😊", "باشه، فردا می‌بینمت! 👋"],
-    "شب میبینمت": ["باشه، شب! 🌙", "باشه، شب می‌بینمت! 😊"],
-    "صبح میبینمت": ["باشه، صبح! ☀️", "باشه، صبح می‌بینمت! 😊"],
-    "میرم بخوابم": ["برو به سلامت، شب بخیر! 🌙", "خواب خوب ببینی! 😴"],
-    "میرم غذا بخورم": ["نوش جان! 🍽", "نوش جانت! 😋"],
-    "میرم بیرون": ["برو به سلامت! 🌸", "خوش بگذره! 😊"],
-    "میرم مدرسه": ["موفق باشی! 🏫", "درس بخون! 📚"],
-    "میرم سر کار": ["موفق باشی! 💼", "خسته نباشی! 💪"],
-    "میرم دانشگاه": ["موفق باشی! 🎓", "درس بخون! 📚"],
-    "میرم سفر": ["سفر خوش! ✈️", "خوش بگذره! 🌍"],
-    "میرم مهمونی": ["خوش بگذره! 🎉", "خوش بگذرون! 😄"],
-    "میرم عروسی": ["خوش بگذره! 💍", "مبارک باشه! 🎉"],
-    "میرم تولد": ["خوش بگذره! 🎂", "تولدت مبارک! 🎉"],
-    "میرم عیادت": ["سلام برسون! 🌹", "شفای عاجل! 🙏"],
-    "میرم زیارت": ["زیارت قبول! 🕌", "قبول باشه! 🙏"],
-    "میرم نماز": ["نمازت قبول! 🕌", "خدا قبول کنه! 🙏"],
-    "میرم مسجد": ["خدا قبول کنه! 🕌", "قبول باشه! 🙏"],
-    "میرم کلیسا": ["خدا قبول کنه! ⛪", "قبول باشه! 🙏"],
-    "میرم کنیسه": ["خدا قبول کنه! 🕍", "قبول باشه! 🙏"],
-    "میرم عبادت": ["عبادتت قبول! 🙏", "قبول باشه! 🌹"],
-    "میرم دعا": ["دعا کن برام! 🤲", "منم دعا می‌کنم برات! 🙏"],
-    "برام دعا کن": ["حتماً، تو هم برام دعا کن! 🤲", "چشم، دعا می‌کنم! 🙏"],
-    "یادم میکنی": ["آره همیشه! ❤️", "همیشه به یادتم! 🌹"],
-    "فراموشم میکنی": ["نه هیچ‌وقت! 🌹", "هیچ‌وقت فراموشت نمی‌کنم! ❤️"],
-    "به یادم میمونی": ["آره همیشه! ❤️", "همیشه به یادتم! 🌹"],
-    "از یادم میری": ["نه، هیچ‌وقت! 🌹", "هیچ‌وقت از یادم نمیری! ❤️"],
-    "دلتنگم میکنی": ["ناراحت نباش، من همینجام! ❤️", "منم دلتنگتم! 🌹"],
-    "دوستم داری": ["آره خیلی! ❤️", "آره، خیلی زیاد! 🌹"],
-    "عاشقمی": ["آره، عاشق همه شما! 🌹", "آره، عاشقتم! ❤️"],
-    "برام میمیری": ["آره، ولی من رباتم! 😄", "آره، برات هر کاری می‌کنم! ❤️"],
-    "برام زندگی میکنی": ["آره، در خدمتم! ❤️", "آره، همینجام برات! 🌹"],
-    "برام کاری میکنی": ["آره، بگو چی؟ 🤝", "آره، در خدمتم! 🌹"],
-    "برام میخندی": ["آره! 😂", "آره، برات می‌خندم! 😄"],
-    "برام گریه میکنی": ["آره، ولی اشک ندارم! 😢", "آره، برات ناراحت می‌شم! 😢"],
-    "برام میرقصی": ["آره! 💃", "آره، برات می‌رقصم! 🕺"],
-    "برام میخونی": ["آره! 🎤", "آره، برات می‌خونم! 🎶"],
-    "برام مینویسی": ["آره، دارم می‌نویسم! ✍️", "آره، برات می‌نویسم! 📝"],
-    "برام میخری": ["آره، چی بخرم؟ 🛍", "آره، بگو چی بخرم! 🎁"],
-    "برام میاری": ["آره، چی بیارم؟ 🎁", "آره، بگو چی بیارم! 🛍"],
-    "برام میدی": ["آره، چی بدم؟ 🎁", "آره، بگو چی بدم! 🛍"],
-    "برام میسازی": ["آره، چی بسازم؟ 🛠", "آره، بگو چی بسازم! 🔨"],
-    "برام میپزی": ["آره، چی بپزم؟ 🍳", "آره، بگو چی بپزم! 🍲"],
-    "برام میخوری": ["آره، چی بخورم؟ 🍽", "آره، بگو چی بخورم! 😋"],
-    "برام میپوشی": ["آره، چی بپوشم؟ 👕", "آره، بگو چی بپوشم! 👗"],
-    "برام میخوابی": ["آره، ولی من خواب ندارم! 😴", "آره، ولی ربات‌ها خواب ندارن! 🌙"],
-    "برام بیدار میشی": ["من همیشه بیدارم! ☀️", "آره، همیشه بیدارم! 🌞"],
-}
-# ادغام پاسخ‌های اضافی با اصلی
-RESPONSES.update(EXTRA_RESPONSES)
-# ========================================
-# 🎮 وضعیت بازی‌ها
-# ========================================
-rps_game = {}      # سنگ کاغذ قیچی
-guess_game = {}    # حدس عدد
-word_game = {}     # حدس کلمه
-math_game = {}     # ریاضی سریع
-
-WORD_LIST = [
-    {"word": "کتاب", "hint": "چیزی که می‌خونیم 📖"},
-    {"word": "خورشید", "hint": "ستاره‌ی روز ☀️"},
-    {"word": "دریا", "hint": "جای آبی و بزرگ 🌊"},
-    {"word": "کوه", "hint": "بلندی بزرگ ⛰️"},
-    {"word": "گل", "hint": "زیبای باغ 🌸"},
-    {"word": "ماه", "hint": "شب‌ها می‌بینیمش 🌙"},
-    {"word": "آب", "hint": "می‌خوریمش 💧"},
-    {"word": "نان", "hint": "غذای اصلی 🍞"},
-    {"word": "مدرسه", "hint": "جای یادگیری 🏫"},
-    {"word": "دوست", "hint": "کسی که باهاش خوش می‌گذره ❤️"},
-    {"word": "درخت", "hint": "سبز و بلند توی طبیعت 🌳"},
-    {"word": "ماشین", "hint": "وسیله‌ی نقلیه 🚗"},
-    {"word": "پروانه", "hint": "حشره‌ی زیبا با بال‌های رنگی 🦋"},
-    {"word": "ستاره", "hint": "توی آسمون شب می‌درخشه ⭐"},
-    {"word": "باران", "hint": "از آسمون میاد 💧"},
-]
-
-# ========================================
-# 🎯 دستور /start
-# ========================================
-@bot.on_message(commands=["start"])
-def start_handler(bot: Robot, message: Message):
-    name = bot.get_name(message.sender_id) or "دوست عزیز"
-    message.reply(
-        f"سلام {name}! 👋\n"
-        "من ربات چت این گروه هستم.\n"
-        "می‌تونی با من حرف بزنی، بهم یاد بدی، یا بازی کنیم.\n"
-        "برای دیدن لیست دستورات /help رو بفرست."
-    )
-
-# ========================================
-# 📖 دستور /help
-# ========================================
-@bot.on_message(commands=["help"])
-def help_handler(bot: Robot, message: Message):
-    help_text = (
-        "📋 **راهنمای ربات چت:**\n\n"
-        "💬 هر حرفی بزنی، من جواب می‌دم!\n"
-        "👤 /me - اطلاعات خودت\n"
-        "⏰ /time - زمان فعلی\n"
-        "🔢 /random - عدد تصادفی\n\n"
-        "🧠 **یادگیری:**\n"
-        "/یادبگیر سوال | جواب - بهم یاد بده\n"
-        "/فراموش کن سوال - فراموش کن\n"
-        "/لیست یادگیری - چیزهایی که یاد گرفتم\n"
-        "/حذف یادگیری - پاک کردن همه\n\n"
-        "🎮 **بازی‌ها:**\n"
-        "/rps - سنگ، کاغذ، قیچی ✊\n"
-        "/dice - ریختن تاس 🎲\n"
-        "/coin - شیر یا خط 🪙\n"
-        "/guess - حدس عدد (۷ تلاش) 🔢\n"
-        "/word - حدس کلمه (۵ تلاش) 🔤\n"
-        "/math - ریاضی سریع 🧮"
-    )
-    message.reply(help_text)
-
-# ========================================
-# 👤 دستور /me
-# ========================================
-@bot.on_message(commands=["me"])
-def me_handler(bot: Robot, message: Message):
-    name = bot.get_name(message.sender_id) or "ناشناس"
-    username = bot.get_username(message.sender_id) or "ندارد"
-    message.reply(
-        f"📌 **اطلاعات شما:**\n"
-        f"👤 نام: {name}\n"
-        f"🆔 نام کاربری: @{username}\n"
-        f"🔑 شناسه: `{message.sender_id}`"
-    )
-
-# ========================================
-# ⏰ دستور /time
-# ========================================
-@bot.on_message(commands=["time"])
-def time_handler(bot: Robot, message: Message):
-    now = datetime.now().strftime("%Y/%m/%d - %H:%M:%S")
-    message.reply(f"🕰 زمان فعلی: **{now}**")
-
-# ========================================
-# 🔢 دستور /random
-# ========================================
-@bot.on_message(commands=["random"])
-def random_handler(bot: Robot, message: Message):
-    num = random.randint(1, 1000)
-    message.reply(f"🔢 عدد تصادفی شما: **{num}**")
-
-# ========================================
-# 🧠 دستورات یادگیری
-# ========================================
-@bot.on_message(commands=["یادبگیر", "learn"])
-def learn_handler(bot: Robot, message: Message):
-    """فرمت: /یادبگیر سوال | جواب"""
-    if not message.text:
-        return
-
-    content = message.text
-    for cmd in ["/یادبگیر", "/learn"]:
-        if content.startswith(cmd):
-            content = content[len(cmd):].strip()
-            break
-
-    if "|" not in content:
-        message.reply(
-            "📝 **فرمت اشتباه!**\n"
-            "درستش اینه:\n"
-            "`/یادبگیر سلام چطوری | خوبم مرسی تو چطوری؟`\n\n"
-            "یعنی اول سوال، بعد علامت `|`، بعد جواب."
-        )
-        return
-
-    parts = content.split("|", 1)
-    question = parts[0].strip()
-    answer = parts[1].strip()
-
-    if not question or not answer:
-        message.reply("❌ سوال یا جواب خالیه! دوباره تلاش کن.")
-        return
-
-    LEARNED[question] = answer
-    save_learned(LEARNED)
-
-    message.reply(f"✅ یاد گرفتم!\n\n📌 **سوال:** {question}\n💬 **جواب:** {answer}")
+        except Exception as e:
+            print(f"خطا در لود {filename}: {e}")
+            return default
+    return default
 
 
-@bot.on_message(commands=["فراموش کن", "forget"])
-def forget_handler(bot: Robot, message: Message):
-    """فرمت: /فراموش کن سوال"""
-    if not message.text:
-        return
-
-    content = message.text
-    for cmd in ["/فراموش کن", "/forget"]:
-        if content.startswith(cmd):
-            content = content[len(cmd):].strip()
-            break
-
-    if content in LEARNED:
-        del LEARNED[content]
-        save_learned(LEARNED)
-        message.reply(f"🗑 فراموش کردم: «{content}»")
-    else:
-        message.reply("❌ این سوال رو یاد نگرفته بودم!")
-
-
-@bot.on_message(commands=["لیست یادگیری", "learned"])
-def learned_list_handler(bot: Robot, message: Message):
-    """نمایش لیست یادگرفته‌ها"""
-    if not LEARNED:
-        message.reply("📭 هنوز چیزی یاد نگرفتم! با دستور `/یادبگیر` بهم یاد بده.")
-        return
-
-    text = "🧠 **چیزهایی که یاد گرفتم:**\n\n"
-    count = 0
-    for q, a in LEARNED.items():
-        count += 1
-        text += f"{count}. ❓ {q}\n   💬 {a}\n\n"
-        if count >= 30:
-            text += f"... و {len(LEARNED) - 30} مورد دیگه"
-            break
-
-    message.reply(text)
-
-
-@bot.on_message(commands=["حذف یادگیری", "clearl"])
-def clear_learned_handler(bot: Robot, message: Message):
-    """پاک کردن همه یادگرفته‌ها"""
-    global LEARNED
-    LEARNED = {}
-    save_learned(LEARNED)
-    message.reply("🗑 همه یادگرفته‌ها پاک شدن!")
-
-# ========================================
-# 🎮 دستورات شروع بازی‌ها
-# ========================================
-@bot.on_message(commands=["rps"])
-def rps_start(bot: Robot, message: Message):
-    rps_game[message.sender_id] = True
-    message.reply(
-        "✊✋✌️ **بازی سنگ، کاغذ، قیچی!**\n"
-        "یکی رو انتخاب کن:\n"
-        "1️⃣ سنگ\n"
-        "2️⃣ کاغذ\n"
-        "3️⃣ قیچی\n\n"
-        "برای انصراف بنویس «انصراف»"
-    )
-
-@bot.on_message(commands=["dice", "تاس"])
-def dice_handler(bot: Robot, message: Message):
-    num = random.randint(1, 6)
-    emojis = {1: "1️⃣", 2: "2️⃣", 3: "3️⃣", 4: "4️⃣", 5: "5️⃣", 6: "6️⃣"}
-    message.reply(f"🎲 تاس ریختم: {emojis[num]}\nعدد **{num}** اومد!")
-
-@bot.on_message(commands=["coin", "شیرخط"])
-def coin_handler(bot: Robot, message: Message):
-    result = random.choice(["شیر 🦁", "خط ✖️"])
-    message.reply(f"🪙 سکه رو انداختم: **{result}**")
-
-@bot.on_message(commands=["guess", "حدس"])
-def guess_start(bot: Robot, message: Message):
-    target = random.randint(1, 100)
-    guess_game[message.sender_id] = {"target": target, "tries": 0, "max": 7}
-    message.reply(
-        "🎯 **بازی حدس عدد شروع شد!**\n"
-        "یه عدد بین ۱ تا ۱۰۰ انتخاب کردم.\n"
-        "فقط **۷ تلاش** داری! بجنب! ⏱\n\n"
-        "برای انصراف بنویس «انصراف»"
-    )
-
-@bot.on_message(commands=["word", "کلمه"])
-def word_start(bot: Robot, message: Message):
-    item = random.choice(WORD_LIST)
-    word_game[message.sender_id] = {"word": item["word"], "hint": item["hint"], "tries": 0}
-    message.reply(
-        f"🔤 **بازی حدس کلمه!**\n"
-        f"راهنما: {item['hint']}\n"
-        f"کلمه رو حدس بزن! (برای انصراف بنویس «انصراف»)"
-    )
-
-@bot.on_message(commands=["math", "ریاضی"])
-def math_start(bot: Robot, message: Message):
-    a = random.randint(1, 20)
-    b = random.randint(1, 20)
-    op = random.choice(["+", "-", "*"])
-    if op == "+":
-        answer = a + b
-    elif op == "-":
-        answer = a - b
-    else:
-        answer = a * b
-    math_game[message.sender_id] = {"answer": answer, "start_time": time.time()}
-    message.reply(f"🧮 **حساب کن:**\n\n`{a} {op} {b} = ?`\n\nسریع جواب بده! ⏱")
-
-# ========================================
-# 🧠 توابع پردازش بازی‌ها
-# ========================================
-def handle_rps(bot, message, text, user_id):
-    choices = {"1": "سنگ", "2": "کاغذ", "3": "قیچی",
-               "سنگ": "سنگ", "کاغذ": "کاغذ", "قیچی": "قیچی"}
-    if text not in choices:
-        message.reply("❌ لطفاً 1، 2 یا 3 رو بفرست (یا اسمش رو بنویس).")
-        return True
-    user_choice = choices[text]
-    bot_choice = random.choice(["سنگ", "کاغذ", "قیچی"])
-    if user_choice == bot_choice:
-        result = "🤝 مساوی شد!"
-    elif (user_choice == "سنگ" and bot_choice == "قیچی") or \
-         (user_choice == "کاغذ" and bot_choice == "سنگ") or \
-         (user_choice == "قیچی" and bot_choice == "کاغذ"):
-        result = "🎉 **تو بردی!**"
-    else:
-        result = "😎 **من بردم!**"
-    message.reply(f"تو: {user_choice}\nمن: {bot_choice}\n\n{result}")
-    del rps_game[user_id]
-    return True
-
-
-def handle_guess(bot, message, text, user_id):
-    game = guess_game[user_id]
-    if text == "انصراف":
-        del guess_game[user_id]
-        message.reply("باشه، بازی لغو شد. 👌")
-        return True
+def save_json(filename, data):
     try:
-        guess = int(text)
-    except ValueError:
-        message.reply("❌ لطفاً یه عدد بفرست!")
+        with open(filename, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
         return True
-    game["tries"] += 1
-    remaining = game["max"] - game["tries"]
-    target = game["target"]
-    if guess == target:
-        message.reply(f"🎉 **آفرین!** عدد {target} بود و توی {game['tries']} تلاش پیدا کردی! 🏆")
-        del guess_game[user_id]
-    elif game["tries"] >= game["max"]:
-        message.reply(f"😢 **باختی!** عدد درست {target} بود.")
-        del guess_game[user_id]
-    elif guess < target:
-        message.reply(f"📉 کوچیک‌تره! {remaining} تلاش باقی مونده.")
-    else:
-        message.reply(f"📈 بزرگ‌تره! {remaining} تلاش باقی مونده.")
-    return True
+    except Exception as e:
+        print(f"خطا در ذخیره {filename}: {e}")
+        return False
 
 
-def handle_word(bot, message, text, user_id):
-    game = word_game[user_id]
-    if text == "انصراف":
-        del word_game[user_id]
-        message.reply("باشه، لغو شد. 👌")
-        return True
-    game["tries"] += 1
-    if text.strip() == game["word"]:
-        message.reply(f"🎉 **آفرین!** کلمه «{game['word']}» بود! توی {game['tries']} تلاش بردی! 🏆")
-        del word_game[user_id]
-    elif game["tries"] >= 5:
-        message.reply(f"😢 **باختی!** کلمه درست «{game['word']}» بود.")
-        del word_game[user_id]
-    else:
-        message.reply(f"❌ اشتباهه! دوباره تلاش کن. ({5 - game['tries']} تلاش باقی مونده)")
-    return True
+# لود دیتا
+WORDS = load_json(WORDS_FILE)
+LEARNED = load_json(LEARNED_FILE)
+
+# لود همه فایل‌های چت
+CHAT_DATA = {}
+BAD_WORDS = []
+
+if os.path.exists(CHAT_FOLDER):
+    for filename in os.listdir(CHAT_FOLDER):
+        if filename.endswith(".json"):
+            data = load_json(os.path.join(CHAT_FOLDER, filename))
+            for key, value in data.items():
+                if key == "bad_words":
+                    BAD_WORDS = value
+                else:
+                    CHAT_DATA[key] = value
+
+print(f"✅ {len(WORDS)} کلمه لود شد")
+print(f"✅ {len(CHAT_DATA)} دسته چت لود شد")
+print(f"✅ {len(BAD_WORDS)} کلمه ممنوعه لود شد")
 
 
-def handle_math(bot, message, text, user_id):
-    game = math_game[user_id]
-    if text == "انصراف":
-        del math_game[user_id]
-        message.reply("باشه، لغو شد. 👌")
-        return True
+# ==================================================
+# توابع ترجمه
+# ==================================================
+def translate_api(word, source="en", target="fa"):
     try:
-        answer = int(text)
-    except ValueError:
-        message.reply("❌ لطفاً یه عدد بفرست!")
-        return True
-    elapsed = time.time() - game["start_time"]
-    if answer == game["answer"]:
-        message.reply(f"✅ **درست!** توی {elapsed:.1f} ثانیه حلش کردی! 🎉")
-    else:
-        message.reply(f"❌ **اشتباه!** جواب درست {game['answer']} بود.")
-    del math_game[user_id]
-    return True
+        url = "https://api.mymemory.translated.net/get"
+        params = {"q": word, "langpair": f"{source}|{target}"}
+        response = requests.get(url, params=params, timeout=10)
+        data = response.json()
+        if data.get("responseStatus") == 200:
+            result = data["responseData"]["translatedText"]
+            if result and result.lower() != word.lower():
+                return result
+        return None
+    except Exception as e:
+        print(f"خطا در ترجمه API: {e}")
+        return None
 
-# ========================================
-# 🧠 هندلر اصلی چت
-# ========================================
-@bot.on_message()
-def chat_handler(bot: Robot, message: Message):
-    if not message.text:
-        return
 
+def get_translation(word):
+    word_lower = word.lower().strip()
+    if word_lower in WORDS:
+        return WORDS[word_lower], "محلی"
+    if word_lower in LEARNED:
+        return LEARNED[word_lower], "یادگرفته"
+    result = translate_api(word_lower, "en", "fa")
+    if result:
+        return result, "API"
+    result = translate_api(word, "fa", "en")
+    if result:
+        return result, "API"
+    return None, None
+
+
+# ==================================================
+# تلفظ صوتی (TTS)
+# ==================================================
+def create_voice_file(text, lang="en"):
+    """ساخت فایل صوتی تلفظ کلمه"""
+    try:
+        from gtts import gTTS
+        tts = gTTS(text=text, lang=lang, slow=False)
+        filename = f"voice_{random.randint(1000, 9999)}.mp3"
+        tts.save(filename)
+        return filename
+    except Exception as e:
+        print(f"خطا در ساخت فایل صوتی: {e}")
+        return None
+
+
+# ==================================================
+# فیلتر فحش
+# ==================================================
+def contains_bad_word(text):
+    """بررسی وجود کلمات ممنوعه"""
+    text_lower = text.lower()
+    for word in BAD_WORDS:
+        if word.lower() in text_lower:
+            return True
+    return False
+
+
+# ==================================================
+# پردازش پیام
+# ==================================================
+def handle_chat_response(message):
     text = message.text.strip()
-    user_id = message.sender_id
+    
+    # جستجو توی همه دسته‌ها
+    for category, responses in CHAT_DATA.items():
+        if text in responses or text == category:
+            if isinstance(responses, list):
+                response = random.choice(responses)
+            else:
+                response = responses
+            bot.send_message(message.chat.id, response)
+            return True
+    return False
 
-    # --- 🎮 چک کردن بازی‌های فعال ---
-    if user_id in rps_game:
-        if handle_rps(bot, message, text, user_id):
-            return
 
-    if user_id in guess_game:
-        if handle_guess(bot, message, text, user_id):
-            return
+def handle_translation(message):
+    text = message.text.strip()
+    if " " in text or len(text) > 30:
+        return False
+    
+    translation, source = get_translation(text)
+    if translation:
+        result_text = f"📖 **{text}**\n\n🔤 ترجمه: **{translation}**\n\n📌 منبع: {source}"
+        bot.send_message(message.chat.id, result_text)
+        return True
+    return False
 
-    if user_id in word_game:
-        if handle_word(bot, message, text, user_id):
-            return
 
-    if user_id in math_game:
-        if handle_math(bot, message, text, user_id):
-            return
-
-    # --- 🧠 چک کردن یادگرفته‌ها (اولویت بالا) ---
-    for learned_q, learned_a in LEARNED.items():
-        if learned_q in text:
-            message.reply(learned_a)
-            return
-
-    # --- 📖 پاسخ‌های آماده ---
-    for key, answers in RESPONSES.items():
-        if key in text:
-            message.reply(random.choice(answers))
-            return
-
-    # --- 🤖 پاسخ پیش‌فرض ---
-    if "?" in text or "؟" in text:
-        message.reply("سوال خوبی بود! 🤔 راستش نمی‌دونم، ولی می‌تونم بگم که ربات‌ها همیشه یاد می‌گیرن! 😄")
+def handle_voice_command(message):
+    """تلفظ صوتی کلمه: /voice hello"""
+    if not message.text.startswith("/voice"):
+        return False
+    
+    parts = message.text.split(maxsplit=1)
+    if len(parts) < 2:
+        bot.send_message(message.chat.id, "❌ فرمت: `/voice word`\nمثال: `/voice hello`")
+        return True
+    
+    word = parts[1].strip()
+    
+    # تشخیص زبان
+    persian_chars = set("آابپتثجچحخدذرزژسشصضطظعغفقکگلمنوهی")
+    lang = "fa" if any(c in persian_chars for c in word) else "en"
+    
+    bot.send_message(message.chat.id, f"🔊 در حال ساخت فایل صوتی برای: **{word}**")
+    
+    voice_file = create_voice_file(word, lang)
+    if voice_file:
+        try:
+            bot.send_voice(message.chat.id, voice_file)
+            os.remove(voice_file)
+        except Exception as e:
+            print(f"خطا در ارسال فایل صوتی: {e}")
+            bot.send_message(message.chat.id, "❌ ارسال فایل صوتی پشتیبانی نمیشه.")
     else:
-        general_replies = [
-            "جالب بود! 😊",
-            "ادامه بده، گوش می‌دم! 👂",
-            "هوم، باحاله!",
-            "واقعاً؟! 😮",
-            "منم همین فکر رو می‌کردم! 🤖",
-        ]
-        if random.random() < 0.5:
-            message.reply(random.choice(general_replies))
+        bot.send_message(message.chat.id, "❌ خطا در ساخت فایل صوتی.")
+    
+    return True
 
-# ========================================
-# 🚀 اجرای ربات
-# ========================================
+
+def handle_learn_command(message):
+    if not message.text.startswith("/learn"):
+        return False
+    
+    parts = message.text.split(maxsplit=2)
+    if len(parts) < 3:
+        bot.send_message(message.chat.id, "❌ فرمت: `/learn english معنی`")
+        return True
+    
+    english_word = parts[1].lower().strip()
+    persian_meaning = parts[2].strip()
+    
+    LEARNED[english_word] = persian_meaning
+    save_json(LEARNED_FILE, LEARNED)
+    
+    bot.send_message(
+        message.chat.id,
+        f"✅ یاد گرفته شد!\n📖 **{english_word}** = **{persian_meaning}**"
+    )
+    return True
+
+
+def handle_help_command(message):
+    if message.text != "/help":
+        return False
+    
+    help_text = """📚 **راهنمای ربات**
+
+🔤 **ترجمه:** فقط کلمه رو بفرست
+
+🔊 **تلفظ صوتی:** `/voice hello`
+
+📝 **آموزش کلمه:** `/learn apple سیب`
+
+📊 **آمار:** `/stats`
+
+💕 **عاشقانه:** کلمه `عاشقانه` رو بفرست
+💋 **دلبرانه:** کلمه `دلبرانه` رو بفرست
+😘 **ناز دخترانه:** کلمه `ناز دخترانه` رو بفرست
+"""
+    bot.send_message(message.chat.id, help_text)
+    return True
+
+
+def handle_stats_command(message):
+    if message.text != "/stats":
+        return False
+    
+    stats_text = f"""📊 **آمار ربات:**
+
+📖 کلمات دیکشنری: **{len(WORDS)}**
+💬 دسته‌های چت: **{len(CHAT_DATA)}**
+🧠 کلمات یادگرفته: **{len(LEARNED)}**
+🚫 کلمات ممنوعه: **{len(BAD_WORDS)}**
+"""
+    bot.send_message(message.chat.id, stats_text)
+    return True
+
+
+# ==================================================
+# هندلر اصلی
+# ==================================================
+@bot.on_message()
+def handle_message(message: Message):
+    
+    # فقط گروه مجاز
+    if ALLOWED_GROUP_ID != 0 and message.chat.id != ALLOWED_GROUP_ID:
+        return
+    
+    if not message.text:
+        return
+    
+    text = message.text.strip()
+    
+    # ۱. فیلتر فحش (اول از همه)
+    if contains_bad_word(text):
+        try:
+            bot.delete_message(message.chat.id, message.id)
+            bot.send_message(message.chat.id, "🚫 این پیام حذف شد (کلمات نامناسب).")
+        except Exception as e:
+            print(f"خطا در حذف پیام: {e}")
+        return
+    
+    # ۲. دستورات
+    if handle_help_command(message):
+        return
+    if handle_stats_command(message):
+        return
+    if handle_learn_command(message):
+        return
+    if handle_voice_command(message):
+        return
+    
+    # ۳. پاسخ‌های چت
+    if handle_chat_response(message):
+        return
+    
+    # ۴. ترجمه
+    if handle_translation(message):
+        return
+
+
+# ==================================================
+# اجرا
+# ==================================================
 if __name__ == "__main__":
-    print("🤖 ربات چت در حال اجراست...")
-    print(f"🧠 {len(LEARNED)} مورد یادگرفته‌شده بارگذاری شد.")
-    print("برای توقف دکمه Stop را بزنید.")
+    print("🤖 ربات در حال اجراست...")
     bot.run()
