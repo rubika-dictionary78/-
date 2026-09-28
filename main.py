@@ -238,13 +238,11 @@ def handle_stats_command(message, chat_id):
 """
     bot.send_message(chat_id, stats_text)
     return True
-
-
 # ==================================================
 # هندلر اصلی
 # ==================================================
 @bot.on_message()
-def handle_message(_bot, message: Message):
+def handle_message(message: Message):   # ← اینجا فقط message می‌گیریم
     try:
         chat_id = get_chat_id(message)
         if chat_id is None:
@@ -286,8 +284,6 @@ def handle_message(_bot, message: Message):
         print(f"❌ خطا در هندلر: {e}")
         import traceback
         traceback.print_exc()
-
-
 # ==================================================
 # اجرا
 # ==================================================
