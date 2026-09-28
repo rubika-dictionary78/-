@@ -1,2 +1,4 @@
 rubka
 Pillow
+requests
+gtts
