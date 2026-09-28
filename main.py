@@ -1,14 +1,13 @@
 # -*- coding: utf-8 -*-
 """
-ربات دیکشنری پیشرفته روبیکا
+ربات دیکشنری پیشرفته روبیکا - نسخه RoboBot
 """
 
 import os
 import json
 import random
 import requests
-from rubka import Robot
-from rubka.context import Message
+from robobot import Bot
 
 # ==================================================
 # تنظیمات
@@ -19,7 +18,7 @@ ALLOWED_GROUP_ID = int(os.getenv("ALLOWED_GROUP_ID") or "0")
 if not BOT_TOKEN:
     raise ValueError("توکن ربات یافت نشد!")
 
-bot = Robot(token=BOT_TOKEN)
+bot = Bot(BOT_TOKEN)
 
 WORDS_FILE = "words.json"
 RESPONSES_FILE = "responses.json"
@@ -124,167 +123,113 @@ def contains_bad_word(text):
 
 
 # ==================================================
-# کمکی‌ها
+# توابع پردازش
 # ==================================================
-def get_chat_id(message):
-    """گرفتن chat_id از پیام (پشتیبانی از ساختارهای مختلف)"""
-    if hasattr(message, 'chat_id'):
-        return message.chat_id
-    elif hasattr(message, 'chat') and hasattr(message.chat, 'id'):
-        return message.chat.id
-    elif hasattr(message, 'message') and hasattr(message.message, 'chat_id'):
-        return message.message.chat_id
-    else:
-        print(f"⚠️ ساختار پیام ناشناخته: {dir(message)}")
-        return None
-
-
-def get_text(message):
-    """گرفتن متن پیام (پشتیبانی از Update و Message)"""
-    if hasattr(message, 'text') and message.text:
-        return message.text.strip()
-    elif hasattr(message, 'message') and hasattr(message.message, 'text') and message.message.text:
-        return message.message.text.strip()
-    return None
-
-
-# ==================================================
-# پردازش پیام‌ها
-# ==================================================
-def handle_chat_response(message, chat_id):
-    text = get_text(message)
-    if not text:
-        return False
-    
+async def handle_chat_response(text, chat_id, bot):
     if text in RESPONSES:
         response_list = RESPONSES[text]
         response = random.choice(response_list) if isinstance(response_list, list) else response_list
-        bot.send_message(chat_id, response)
+        await bot.send_message(chat_id, response)
         return True
     
     for category, responses in CHAT_DATA.items():
-        # اصلاح منطق: بررسی می‌کنیم که آیا متن کاربر شامل نام دسته هست یا نه
         if text == category or category in text:
             response = random.choice(responses) if isinstance(responses, list) else responses
-            bot.send_message(chat_id, response)
+            await bot.send_message(chat_id, response)
             return True
     
     return False
 
 
-def handle_translation(message, chat_id):
-    text = get_text(message)
-    if not text:
-        return False
-        
+async def handle_translation(text, chat_id, bot):
     if " " in text or len(text) > 30:
         return False
     
     translation, source = get_translation(text)
     if translation:
-        result_text = f"📖 **{text}**\n\n🔤 ترجمه: **{translation}**\n\n📌 منبع: {source}"
-        bot.send_message(chat_id, result_text)
+        result_text = f"📖 {text}\n\n🔤 ترجمه: {translation}\n\n📌 منبع: {source}"
+        await bot.send_message(chat_id, result_text)
         return True
     return False
 
 
-def handle_learn_command(message, chat_id):
-    text = get_text(message)
-    if not text or not text.startswith("/learn"):
+async def handle_learn_command(text, chat_id, bot):
+    if not text.startswith("/learn"):
         return False
-        
     parts = text.split(maxsplit=2)
     if len(parts) < 3:
-        bot.send_message(chat_id, "❌ فرمت: `/learn english معنی`")
+        await bot.send_message(chat_id, "❌ فرمت: /learn english معنی")
         return True
     english_word = parts[1].lower().strip()
     persian_meaning = parts[2].strip()
     LEARNED[english_word] = persian_meaning
     save_json(LEARNED_FILE, LEARNED)
-    bot.send_message(chat_id, f"✅ **{english_word}** = **{persian_meaning}**")
+    await bot.send_message(chat_id, f"✅ {english_word} = {persian_meaning}")
     return True
 
 
-def handle_help_command(message, chat_id):
-    text = get_text(message)
+async def handle_help_command(text, chat_id, bot):
     if text != "/help":
         return False
-    
-    help_text = """📚 **راهنمای ربات**
-
-🔤 **ترجمه:** فقط کلمه رو بفرست
-📝 **آموزش کلمه:** `/learn apple سیب`
-📊 **آمار:** `/stats`
-
-💕 **دسته‌های چت:**
-عاشقانه، دلبرانه، ناز، جوک، تبریک، تسلیت، تشکر، خانواده، کمک، متفرقه
-"""
-    bot.send_message(chat_id, help_text)
+    help_text = "📚 راهنمای ربات\n\n🔤 ترجمه: فقط کلمه رو بفرست\n📝 آموزش کلمه: /learn apple سیب\n📊 آمار: /stats\n\n💕 دسته‌های چت:\nعاشقانه، دلبرانه، ناز، جوک، تبریک، تسلیت، تشکر، خانواده، کمک، متفرقه"
+    await bot.send_message(chat_id, help_text)
     return True
 
 
-def handle_stats_command(message, chat_id):
-    text = get_text(message)
+async def handle_stats_command(text, chat_id, bot):
     if text != "/stats":
         return False
-    
-    stats_text = f"""📊 **آمار ربات:**
-
-📖 کلمات دیکشنری: **{len(WORDS)}**
-💬 پاسخ‌های عمومی: **{len(RESPONSES)}**
-💕 دسته‌های چت: **{len(CHAT_DATA)}**
-🧠 کلمات یادگرفته: **{len(LEARNED)}**
-🚫 کلمات ممنوعه: **{len(BAD_WORDS)}**
-"""
-    bot.send_message(chat_id, stats_text)
+    stats_text = f"📊 آمار ربات:\n\n📖 کلمات دیکشنری: {len(WORDS)}\n💬 پاسخ‌های عمومی: {len(RESPONSES)}\n💕 دسته‌های چت: {len(CHAT_DATA)}\n🧠 کلمات یادگرفته: {len(LEARNED)}\n🚫 کلمات ممنوعه: {len(BAD_WORDS)}"
+    await bot.send_message(chat_id, stats_text)
     return True
-    
-    # ==================================================
-# هندلر اصلی
+
+
+# ==================================================
+# هندلر اصلی پیام
 # ==================================================
 @bot.on_message()
-def handle_message(message: Message):   # ← اینجا فقط message می‌گیریم
+async def handle_message(bot, message):
     try:
-        chat_id = get_chat_id(message)
+        chat_id = message.chat_id if hasattr(message, 'chat_id') else None
+        
         if chat_id is None:
+            print("⚠️ chat_id پیدا نشد")
             return
         
-        # فقط گروه مجاز
         if ALLOWED_GROUP_ID != 0 and chat_id != ALLOWED_GROUP_ID:
             return
         
-        text = get_text(message)
+        text = message.text.strip() if hasattr(message, 'text') and message.text else None
         if not text:
             return
         
         # ۱. فیلتر فحش
         if contains_bad_word(text):
-            try:
-                bot.send_message(chat_id, "🚫 این پیام به دلیل کلمات نامناسب حذف شد.")
-            except Exception as e:
-                print(f"خطا در ارسال هشدار: {e}")
+            await bot.send_message(chat_id, "🚫 این پیام به دلیل کلمات نامناسب حذف شد.")
             return
         
         # ۲. دستورات
-        if handle_help_command(message, chat_id):
+        if await handle_help_command(text, chat_id, bot):
             return
-        if handle_stats_command(message, chat_id):
+        if await handle_stats_command(text, chat_id, bot):
             return
-        if handle_learn_command(message, chat_id):
+        if await handle_learn_command(text, chat_id, bot):
             return
         
         # ۳. پاسخ‌های چت
-        if handle_chat_response(message, chat_id):
+        if await handle_chat_response(text, chat_id, bot):
             return
         
         # ۴. ترجمه
-        if handle_translation(message, chat_id):
+        if await handle_translation(text, chat_id, bot):
             return
     
     except Exception as e:
         print(f"❌ خطا در هندلر: {e}")
         import traceback
         traceback.print_exc()
+
+
 # ==================================================
 # اجرا
 # ==================================================
