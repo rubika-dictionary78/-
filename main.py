@@ -132,16 +132,29 @@ def get_chat_id(message):
         return message.chat_id
     elif hasattr(message, 'chat') and hasattr(message.chat, 'id'):
         return message.chat.id
+    elif hasattr(message, 'message') and hasattr(message.message, 'chat_id'):
+        return message.message.chat_id
     else:
         print(f"⚠️ ساختار پیام ناشناخته: {dir(message)}")
         return None
+
+
+def get_text(message):
+    """گرفتن متن پیام (پشتیبانی از Update و Message)"""
+    if hasattr(message, 'text') and message.text:
+        return message.text.strip()
+    elif hasattr(message, 'message') and hasattr(message.message, 'text') and message.message.text:
+        return message.message.text.strip()
+    return None
 
 
 # ==================================================
 # پردازش پیام‌ها
 # ==================================================
 def handle_chat_response(message, chat_id):
-    text = message.text.strip()
+    text = get_text(message)
+    if not text:
+        return False
     
     if text in RESPONSES:
         response_list = RESPONSES[text]
@@ -150,7 +163,8 @@ def handle_chat_response(message, chat_id):
         return True
     
     for category, responses in CHAT_DATA.items():
-        if text in category or text == category:
+        # اصلاح منطق: بررسی می‌کنیم که آیا متن کاربر شامل نام دسته هست یا نه
+        if text == category or category in text:
             response = random.choice(responses) if isinstance(responses, list) else responses
             bot.send_message(chat_id, response)
             return True
@@ -159,7 +173,10 @@ def handle_chat_response(message, chat_id):
 
 
 def handle_translation(message, chat_id):
-    text = message.text.strip()
+    text = get_text(message)
+    if not text:
+        return False
+        
     if " " in text or len(text) > 30:
         return False
     
@@ -172,9 +189,11 @@ def handle_translation(message, chat_id):
 
 
 def handle_learn_command(message, chat_id):
-    if not message.text.startswith("/learn"):
+    text = get_text(message)
+    if not text or not text.startswith("/learn"):
         return False
-    parts = message.text.split(maxsplit=2)
+        
+    parts = text.split(maxsplit=2)
     if len(parts) < 3:
         bot.send_message(chat_id, "❌ فرمت: `/learn english معنی`")
         return True
@@ -187,7 +206,8 @@ def handle_learn_command(message, chat_id):
 
 
 def handle_help_command(message, chat_id):
-    if message.text != "/help":
+    text = get_text(message)
+    if text != "/help":
         return False
     
     help_text = """📚 **راهنمای ربات**
@@ -204,7 +224,8 @@ def handle_help_command(message, chat_id):
 
 
 def handle_stats_command(message, chat_id):
-    if message.text != "/stats":
+    text = get_text(message)
+    if text != "/stats":
         return False
     
     stats_text = f"""📊 **آمار ربات:**
@@ -233,10 +254,9 @@ def handle_message(_bot, message: Message):
         if ALLOWED_GROUP_ID != 0 and chat_id != ALLOWED_GROUP_ID:
             return
         
-        if not hasattr(message, 'text') or not message.text:
+        text = get_text(message)
+        if not text:
             return
-        
-        text = message.text.strip()
         
         # ۱. فیلتر فحش
         if contains_bad_word(text):
