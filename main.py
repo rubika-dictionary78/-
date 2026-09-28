@@ -25,6 +25,7 @@ RESPONSES_FILE = "responses.json"
 CHAT_FOLDER = "chat"
 LEARNED_FILE = "learned.json"
 
+
 # ==================================================
 # توابع لود و ذخیره
 # ==================================================
@@ -123,17 +124,20 @@ def contains_bad_word(text):
 
 
 # ==================================================
-# توابع پردازش
+# توابع پردازش (همه async)
 # ==================================================
 async def handle_chat_response(text, chat_id, bot):
+    """پاسخ‌های چت - فقط با تطابق دقیق"""
+    # ۱. جستجو در responses.json
     if text in RESPONSES:
         response_list = RESPONSES[text]
         response = random.choice(response_list) if isinstance(response_list, list) else response_list
         await bot.send_message(chat_id, response)
         return True
     
+    # ۲. جستجو در پوشه chat (فقط تطابق دقیق)
     for category, responses in CHAT_DATA.items():
-        if text == category or category in text:
+        if text == category:
             response = random.choice(responses) if isinstance(responses, list) else responses
             await bot.send_message(chat_id, response)
             return True
@@ -142,6 +146,7 @@ async def handle_chat_response(text, chat_id, bot):
 
 
 async def handle_translation(text, chat_id, bot):
+    """ترجمه کلمه"""
     if " " in text or len(text) > 30:
         return False
     
@@ -154,6 +159,7 @@ async def handle_translation(text, chat_id, bot):
 
 
 async def handle_learn_command(text, chat_id, bot):
+    """یادگیری کلمه جدید"""
     if not text.startswith("/learn"):
         return False
     parts = text.split(maxsplit=2)
@@ -169,17 +175,33 @@ async def handle_learn_command(text, chat_id, bot):
 
 
 async def handle_help_command(text, chat_id, bot):
+    """راهنما"""
     if text != "/help":
         return False
-    help_text = "📚 راهنمای ربات\n\n🔤 ترجمه: فقط کلمه رو بفرست\n📝 آموزش کلمه: /learn apple سیب\n📊 آمار: /stats\n\n💕 دسته‌های چت:\nعاشقانه، دلبرانه، ناز، جوک، تبریک، تسلیت، تشکر، خانواده، کمک، متفرقه"
+    help_text = (
+        "📚 راهنمای ربات\n\n"
+        "🔤 ترجمه: فقط کلمه رو بفرست\n"
+        "📝 آموزش کلمه: /learn apple سیب\n"
+        "📊 آمار: /stats\n\n"
+        "💕 دسته‌های چت:\n"
+        "عاشقانه، دلبرانه، ناز، جوک، تبریک، تسلیت، تشکر، خانواده، کمک، متفرقه"
+    )
     await bot.send_message(chat_id, help_text)
     return True
 
 
 async def handle_stats_command(text, chat_id, bot):
+    """آمار ربات"""
     if text != "/stats":
         return False
-    stats_text = f"📊 آمار ربات:\n\n📖 کلمات دیکشنری: {len(WORDS)}\n💬 پاسخ‌های عمومی: {len(RESPONSES)}\n💕 دسته‌های چت: {len(CHAT_DATA)}\n🧠 کلمات یادگرفته: {len(LEARNED)}\n🚫 کلمات ممنوعه: {len(BAD_WORDS)}"
+    stats_text = (
+        f"📊 آمار ربات:\n\n"
+        f"📖 کلمات دیکشنری: {len(WORDS)}\n"
+        f"💬 پاسخ‌های عمومی: {len(RESPONSES)}\n"
+        f"💕 دسته‌های چت: {len(CHAT_DATA)}\n"
+        f"🧠 کلمات یادگرفته: {len(LEARNED)}\n"
+        f"🚫 کلمات ممنوعه: {len(BAD_WORDS)}"
+    )
     await bot.send_message(chat_id, stats_text)
     return True
 
@@ -190,25 +212,28 @@ async def handle_stats_command(text, chat_id, bot):
 @bot.on_message()
 async def handle_message(bot, message):
     try:
+        # گرفتن chat_id
         chat_id = message.chat_id if hasattr(message, 'chat_id') else None
         
         if chat_id is None:
             print("⚠️ chat_id پیدا نشد")
             return
         
+        # ⚠️ مهم: فقط توی گروه مجاز کار کن
         if ALLOWED_GROUP_ID != 0 and chat_id != ALLOWED_GROUP_ID:
             return
         
+        # گرفتن متن پیام
         text = message.text.strip() if hasattr(message, 'text') and message.text else None
         if not text:
             return
         
-        # ۱. فیلتر فحش
+        # ۱. فیلتر فحش (اول از همه)
         if contains_bad_word(text):
             await bot.send_message(chat_id, "🚫 این پیام به دلیل کلمات نامناسب حذف شد.")
             return
         
-        # ۲. دستورات
+        # ۲. دستورات (اولویت بالا)
         if await handle_help_command(text, chat_id, bot):
             return
         if await handle_stats_command(text, chat_id, bot):
@@ -216,11 +241,11 @@ async def handle_message(bot, message):
         if await handle_learn_command(text, chat_id, bot):
             return
         
-        # ۳. پاسخ‌های چت
+        # ۳. پاسخ‌های چت (فقط با تطابق دقیق)
         if await handle_chat_response(text, chat_id, bot):
             return
         
-        # ۴. ترجمه
+        # ۴. ترجمه (آخرین اولویت)
         if await handle_translation(text, chat_id, bot):
             return
     
