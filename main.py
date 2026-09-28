@@ -13,7 +13,11 @@ from robobot import Bot
 # تنظیمات
 # ==================================================
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-ALLOWED_GROUP_ID = int(os.getenv("ALLOWED_GROUP_ID") or "0")
+_raw_id = os.getenv("ALLOWED_GROUP_ID") or "0"
+try:
+    ALLOWED_GROUP_ID = int(_raw_id)
+except ValueError:
+    ALLOWED_GROUP_ID = _raw_id
 
 if not BOT_TOKEN:
     raise ValueError("توکن ربات یافت نشد!")
