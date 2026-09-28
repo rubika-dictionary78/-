@@ -1,4 +1,4 @@
-rubka==1.7.0
+rubka
 Pillow
 requests
 gtts
