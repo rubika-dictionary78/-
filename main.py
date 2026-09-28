@@ -214,6 +214,7 @@ async def handle_message(bot, message):
     try:
         # گرفتن chat_id
         chat_id = message.chat_id if hasattr(message, 'chat_id') else None
+        print(f"🔍 CHAT ID: {chat_id}")
         
         if chat_id is None:
             print("⚠️ chat_id پیدا نشد")
