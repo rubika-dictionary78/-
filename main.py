@@ -225,7 +225,7 @@ async def handle_message(bot, message):
             return
         
         # ⚠️ مهم: فقط توی گروه مجاز کار کن
-        if ALLOWED_GROUP_ID != 0 and chat_id != ALLOWED_GROUP_ID:
+        if str(ALLOWED_GROUP_ID) != "0" and str(chat_id) != str(ALLOWED_GROUP_ID):
             return
         
         # گرفتن متن پیام
