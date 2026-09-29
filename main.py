@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-🎭 ربات چت شخصیت‌محور روبیکا - v3
+💕 ربات چت دخترونه - هوشمند با یادگیری
 """
 
 import os
@@ -19,10 +19,10 @@ if not BOT_TOKEN:
 
 bot = Robot(token=BOT_TOKEN)
 
-CONFIG_FILE = "config.json"
-PERSONALITIES_FOLDER = "personalities"
+CHAT_FILE = "chat.json"
+LEARNED_FILE = "learned.json"
+ADMINS_FILE = "admins.json"
 
-# حافظه موقت برای جلوگیری از تکرار
 RECENT_MESSAGES = {}
 
 
@@ -53,17 +53,16 @@ def save_json(filename, data):
 
 
 def is_duplicate(chat_id, text):
-    """چک میکنه که همین متن توی ۱۰ ثانیه اخیر اومده یا نه"""
+    """ضد تکرار - چک میکنه توی ۳ ثانیه اخیر این متن اومده یا نه"""
     now = time.time()
     chat_key = str(chat_id)
 
     if chat_key not in RECENT_MESSAGES:
         RECENT_MESSAGES[chat_key] = {}
 
-    # پاک کردن پیام‌های قدیمی
     RECENT_MESSAGES[chat_key] = {
         t: ts for t, ts in RECENT_MESSAGES[chat_key].items()
-        if now - ts < 10
+        if now - ts < 3
     }
 
     if text in RECENT_MESSAGES[chat_key]:
@@ -76,95 +75,38 @@ def is_duplicate(chat_id, text):
 # ==================================================
 # لود اولیه
 # ==================================================
-PERSONALITIES = {}
-if os.path.exists(PERSONALITIES_FOLDER):
-    for filename in os.listdir(PERSONALITIES_FOLDER):
-        if filename.endswith(".json"):
-            name = filename.replace(".json", "")
-            PERSONALITIES[name] = load_json(os.path.join(PERSONALITIES_FOLDER, filename))
+CHAT_DATA = load_json(CHAT_FILE, {"responses": {}, "fallbacks": [], "replies_to_bot": []})
+RESPONSES = CHAT_DATA.get("responses", {})
+FALLBACKS = CHAT_DATA.get("fallbacks", [
+    "😄 چی می‌گی؟ خودمم نفهمیدم",
+    "هوم؟ 🤔 یه کم واضح‌تر بگو",
+    "😅 راستش رو بخوای، نمی‌دونم چی بگم",
+    "ببخشید، متوجه نشدم 🤷‍♀️",
+    "چی گفتی؟ یه بار دیگه بگو 😄",
+    "من که چیزی نفهمیدم! 😂",
+    "شرمنده، بلد نیستم 😅 ولی خب، گفتی چی؟",
+    "هوم... نمی‌دونم چی بگم والا 🤔",
+])
+REPLIES_TO_BOT = CHAT_DATA.get("replies_to_bot", [
+    "چیه؟ 😄 با من کاری داری؟",
+    "جانم؟ چیزی گفتی؟ 😏",
+    "😄 چیه، دلبری می‌کنی؟",
+    "خب؟ 😊 بگو ببینم چی می‌خوای",
+    "😏 چرا پیام منو ریپلای می‌کنی؟",
+    "خب؟ بگو دیگه، منتظرم 😄",
+])
 
-print(f"✅ {len(PERSONALITIES)} شخصیت لود شد")
-print(f"✅ شخصیت‌ها: {list(PERSONALITIES.keys())}")
+LEARNED = load_json(LEARNED_FILE, {})
+ADMINS = load_json(ADMINS_FILE, ["u0Iopfm0841d28cb88ee368ba5f966b6"])
+
+print(f"✅ {len(RESPONSES)} پاسخ اصلی لود شد")
+print(f"✅ {len(LEARNED)} کلمه یادگرفته لود شد")
+print(f"✅ {len(ADMINS)} ادمین تنظیم شده")
 
 
 # ==================================================
-# توابع کمکی (هر بار از دیسک می‌خونن)
+# توابع کمکی
 # ==================================================
-def get_fresh_config():
-    """هر بار config رو از دیسک می‌خونه"""
-    return load_json(CONFIG_FILE, {
-        "admins": [],
-        "default_personality": "friend",
-        "groups": {},
-        "link_filter": True
-    })
-
-
-def is_admin(sender_id):
-    if not sender_id:
-        return False
-    fresh = get_fresh_config()
-    return str(sender_id) in [str(a) for a in fresh.get("admins", [])]
-
-
-def is_group_active(chat_id):
-    fresh = get_fresh_config()
-    groups = fresh.get("groups", {})
-    group = groups.get(str(chat_id), {})
-    return group.get("active", False)
-
-
-def get_group_personality(chat_id):
-    fresh = get_fresh_config()
-    groups = fresh.get("groups", {})
-    group = groups.get(str(chat_id), {})
-    name = group.get("personality", fresh.get("default_personality", "friend"))
-    if name not in PERSONALITIES:
-        name = fresh.get("default_personality", "friend")
-    return PERSONALITIES.get(name, {}), name
-
-
-def is_link_filter_active():
-    fresh = get_fresh_config()
-    return fresh.get("link_filter", True)
-
-
-def register_group(chat_id):
-    fresh = get_fresh_config()
-    groups = fresh.get("groups", {})
-    if str(chat_id) not in groups:
-        groups[str(chat_id)] = {
-            "personality": fresh.get("default_personality", "friend"),
-            "active": True
-        }
-        fresh["groups"] = groups
-        save_json(CONFIG_FILE, fresh)
-
-
-def is_link(text):
-    patterns = ["http://", "https://", "t.me/", "rubika.ir/", "www."]
-    text_lower = text.lower()
-    return any(p in text_lower for p in patterns)
-
-
-def find_response(text, personality):
-    text_lower = text.lower().strip()
-    responses = personality.get("responses", {})
-    if text_lower in responses:
-        r = responses[text_lower]
-        return random.choice(r) if isinstance(r, list) else r
-    return None
-
-
-def get_sender_id(message):
-    for attr in ['sender_id', 'author_id', 'from_id', 'sender']:
-        if hasattr(message, attr):
-            val = getattr(message, attr)
-            if val is not None:
-                return val
-    return None
-
-
 def get_chat_id(message):
     for attr in ['chat_id', 'chat']:
         if hasattr(message, attr):
@@ -185,8 +127,62 @@ def get_message_id(message):
     return None
 
 
+def get_sender_id(message):
+    for attr in ['sender_id', 'author_id', 'from_id', 'sender']:
+        if hasattr(message, attr):
+            val = getattr(message, attr)
+            if val is not None:
+                return val
+    return None
+
+
+def get_reply_to_id(message):
+    """آیدی پیامی که بهش ریپلای زده شده"""
+    for attr in ['reply_to_message_id', 'reply_to_id', 'reply_to']:
+        if hasattr(message, attr):
+            val = getattr(message, attr)
+            if val is not None:
+                if hasattr(val, 'id'):
+                    return val.id
+                return val
+    return None
+
+
+def is_admin(sender_id):
+    if not sender_id:
+        return False
+    return str(sender_id) in [str(a) for a in ADMINS]
+
+
+def find_response(text):
+    """جستجو در پاسخ‌ها (اول یادگرفته، بعد اصلی)"""
+    text_lower = text.lower().strip()
+
+    # ۱. اول کلمه یادگرفته
+    if text_lower in LEARNED:
+        r = LEARNED[text_lower]
+        return random.choice(r) if isinstance(r, list) else r
+
+    # ۲. بعد پاسخ اصلی
+    if text_lower in RESPONSES:
+        r = RESPONSES[text_lower]
+        return random.choice(r) if isinstance(r, list) else r
+
+    return None
+
+
+def get_fallback():
+    """جواب پیش‌فرض وقتی کلمه رو نمی‌شناسه"""
+    return random.choice(FALLBACKS)
+
+
+def get_reply_to_bot():
+    """جواب وقتی کسی به پیام ربات ریپلای می‌زنه"""
+    return random.choice(REPLIES_TO_BOT)
+
+
 async def send_with_reply(chat_id, text, message_id):
-    """ارسال پیام با ریپلای (اگه ممکن باشه)"""
+    """ارسال پیام با ریپلای"""
     try:
         await bot.send_message(chat_id, text, reply_to_message_id=message_id)
     except Exception:
@@ -199,114 +195,141 @@ async def send_with_reply(chat_id, text, message_id):
 # ==================================================
 # دستورات
 # ==================================================
-async def handle_personality_list(text, chat_id, message_id):
-    if text not in ["/personalities", "شخصیت ها", "شخصیتها", "/list"]:
-        return False
-
-    _, current = get_group_personality(chat_id)
-    msg = "🎭 **شخصیت‌های موجود:**\n\n"
-    for name, data in PERSONALITIES.items():
-        display = data.get("_name", name)
-        marker = "✅ " if name == current else "🔹 "
-        msg += f"{marker}{name} - {display}\n"
-    msg += "\n📝 برای فعال‌سازی: /set اسم_شخصیت"
-    await send_with_reply(chat_id, msg, message_id)
-    return True
-
-
-async def handle_set_personality(text, chat_id, sender_id, message_id):
-    if not text.startswith("/set"):
+async def handle_learn(text, chat_id, sender_id, message_id):
+    """/learn کلمه جواب - آموزش دادن"""
+    if not text.startswith("/learn"):
         return False
 
     if not is_admin(sender_id):
-        await send_with_reply(chat_id, "❌ فقط ادمین می‌تونه شخصیت رو تغییر بده!", message_id)
+        return True
+
+    parts = text.split(maxsplit=2)
+    if len(parts) < 3:
+        await send_with_reply(
+            chat_id,
+            "📝 فرمت: /learn کلمه جواب\nمثال: /learn چطوری خوبم عزیزم 😊",
+            message_id
+        )
+        return True
+
+    trigger = parts[1].lower().strip()
+    response = parts[2].strip()
+
+    if trigger not in LEARNED:
+        LEARNED[trigger] = []
+
+    if not isinstance(LEARNED[trigger], list):
+        LEARNED[trigger] = [LEARNED[trigger]]
+
+    LEARNED[trigger].append(response)
+    save_json(LEARNED_FILE, LEARNED)
+
+    await send_with_reply(chat_id, f"✅ یاد گرفتم!\n\n🔹 کلمه: {trigger}\n🔹 جواب: {response}", message_id)
+    return True
+
+
+async def handle_forget(text, chat_id, sender_id, message_id):
+    """/forget کلمه - پاک کردن یک کلمه یادگرفته"""
+    if not text.startswith("/forget"):
+        return False
+
+    if not is_admin(sender_id):
         return True
 
     parts = text.split(maxsplit=1)
     if len(parts) < 2:
-        available = ", ".join(PERSONALITIES.keys())
-        await send_with_reply(chat_id, f"📝 فرمت: /set اسم_شخصیت\n\n🎭 شخصیت‌ها:\n{available}", message_id)
+        await send_with_reply(chat_id, "📝 فرمت: /forget کلمه", message_id)
         return True
 
-    name = parts[1].strip().lower()
-    if name not in PERSONALITIES:
-        available = ", ".join(PERSONALITIES.keys())
-        await send_with_reply(chat_id, f"❌ شخصیت پیدا نشد!\n\n🎭 شخصیت‌ها:\n{available}", message_id)
-        return True
-
-    # مستقیم توی فایل config ذخیره می‌کنه
-    fresh = get_fresh_config()
-    if "groups" not in fresh:
-        fresh["groups"] = {}
-    if str(chat_id) not in fresh["groups"]:
-        fresh["groups"][str(chat_id)] = {}
-    fresh["groups"][str(chat_id)]["personality"] = name
-    fresh["groups"][str(chat_id)]["active"] = True
-    save_json(CONFIG_FILE, fresh)
-
-    display = PERSONALITIES[name].get("_name", name)
-    await send_with_reply(chat_id, f"✅ شخصیت فعال شد: {display} 🎭", message_id)
+    trigger = parts[1].lower().strip()
+    if trigger in LEARNED:
+        del LEARNED[trigger]
+        save_json(LEARNED_FILE, LEARNED)
+        await send_with_reply(chat_id, f"🗑️ کلمه «{trigger}» پاک شد.", message_id)
+    else:
+        await send_with_reply(chat_id, f"❌ کلمه «{trigger}» پیدا نشد.", message_id)
     return True
 
 
-async def handle_current(text, chat_id, message_id):
-    if text != "/current":
+async def handle_list_learned(text, chat_id, sender_id, message_id):
+    """/learned - لیست کلمات یادگرفته"""
+    if text != "/learned":
         return False
-    _, name = get_group_personality(chat_id)
-    display = PERSONALITIES.get(name, {}).get("_name", name)
-    await send_with_reply(chat_id, f"🎭 شخصیت فعلی: {display}", message_id)
-    return True
 
-
-async def handle_off(text, chat_id, sender_id, message_id):
-    if text != "/off":
-        return False
     if not is_admin(sender_id):
         return True
-    register_group(chat_id)
-    fresh = get_fresh_config()
-    if "groups" not in fresh:
-        fresh["groups"] = {}
-    if str(chat_id) not in fresh["groups"]:
-        fresh["groups"][str(chat_id)] = {}
-    fresh["groups"][str(chat_id)]["active"] = False
-    save_json(CONFIG_FILE, fresh)
-    await send_with_reply(chat_id, "🔴 ربات خاموش شد.", message_id)
-    return True
 
-
-async def handle_on(text, chat_id, sender_id, message_id):
-    if text != "/on":
-        return False
-    if not is_admin(sender_id):
+    if not LEARNED:
+        await send_with_reply(chat_id, "📝 هنوز چیزی یاد نگرفتم.", message_id)
         return True
-    register_group(chat_id)
-    fresh = get_fresh_config()
-    if "groups" not in fresh:
-        fresh["groups"] = {}
-    if str(chat_id) not in fresh["groups"]:
-        fresh["groups"][str(chat_id)] = {}
-    fresh["groups"][str(chat_id)]["active"] = True
-    save_json(CONFIG_FILE, fresh)
-    await send_with_reply(chat_id, "🟢 ربات روشن شد.", message_id)
+
+    msg = f"🧠 کلمات یادگرفته ({len(LEARNED)}):\n\n"
+    for key in list(LEARNED.keys())[:30]:
+        msg += f"🔹 {key}\n"
+
+    if len(LEARNED) > 30:
+        msg += f"\n... و {len(LEARNED) - 30} کلمه دیگه"
+
+    await send_with_reply(chat_id, msg, message_id)
     return True
 
 
 async def handle_help(text, chat_id, sender_id, message_id):
+    """/help - راهنما"""
     if text != "/help":
         return False
+
     if not is_admin(sender_id):
         return True
+
     msg = (
         "📚 راهنمای ربات\n\n"
-        "🎭 /set اسم_شخصیت - فعال‌سازی\n"
-        "📋 /personalities - لیست شخصیت‌ها\n"
-        "👤 /current - شخصیت فعلی\n"
-        "🔴 /off - خاموش کردن\n"
-        "🟢 /on - روشن کردن\n\n"
-        "برای لیست شخصیت‌ها بنویس: شخصیت ها"
+        "🧠 /learn کلمه جواب — آموزش\n"
+        "🗑️ /forget کلمه — حذف کلمه\n"
+        "📋 /learned — لیست کلمات یادگرفته\n"
+        "📊 /stats — آمار\n"
+        "❓ /help — راهنما"
     )
     await send_with_reply(chat_id, msg, message_id)
+    return True
+
+
+async def handle_stats(text, chat_id, sender_id, message_id):
+    """/stats - آمار"""
+    if text != "/stats":
+        return False
+
+    msg = (
+        f"📊 آمار ربات:\n\n"
+        f"💬 پاسخ‌های اصلی: {len(RESPONSES)}\n"
+        f"🧠 کلمات یادگرفته: {len(LEARNED)}\n"
+        f"👥 ادمین‌ها: {len(ADMINS)}"
+    )
+    await send_with_reply(chat_id, msg, message_id)
+    return True
+
+
+async def handle_add_admin(text, chat_id, sender_id, message_id):
+    """/addadmin - اضافه کردن ادمین (فقط ادمین اصلی)"""
+    if not text.startswith("/addadmin"):
+        return False
+
+    # فقط اگه خودت ادمین باشی
+    if not is_admin(sender_id):
+        return True
+
+    parts = text.split(maxsplit=1)
+    if len(parts) < 2:
+        await send_with_reply(chat_id, "📝 فرمت: /addadmin آیدی_عددی", message_id)
+        return True
+
+    new_admin = parts[1].strip()
+    if new_admin not in ADMINS:
+        ADMINS.append(new_admin)
+        save_json(ADMINS_FILE, ADMINS)
+        await send_with_reply(chat_id, f"✅ ادمین جدید اضافه شد.", message_id)
+    else:
+        await send_with_reply(chat_id, "❌ این کاربر از قبل ادمینه.", message_id)
     return True
 
 
@@ -324,45 +347,47 @@ async def handle_message(_bot, message):
         if not text:
             return
 
-        # 🚫 چک کردن پیام تکراری
+        # 🚫 ضد تکرار
         if is_duplicate(chat_id, text):
-            print(f"⚠️ پیام تکراری نادیده گرفته شد: {text[:30]}")
             return
 
         sender_id = get_sender_id(message)
         message_id = get_message_id(message)
-
-        # 🔗 فیلتر لینک
-        if is_link_filter_active() and is_group_active(chat_id) and is_link(text):
-            try:
-                await bot.delete_message(chat_id, message_id)
-            except Exception as e:
-                print(f"⚠️ خطا در حذف لینک: {e}")
-            return
+        reply_to_id = get_reply_to_id(message)
 
         # 🎯 دستورات
         if await handle_help(text, chat_id, sender_id, message_id):
             return
-        if await handle_personality_list(text, chat_id, message_id):
+        if await handle_stats(text, chat_id, sender_id, message_id):
             return
-        if await handle_set_personality(text, chat_id, sender_id, message_id):
+        if await handle_learn(text, chat_id, sender_id, message_id):
             return
-        if await handle_current(text, chat_id, message_id):
+        if await handle_forget(text, chat_id, sender_id, message_id):
             return
-        if await handle_off(text, chat_id, sender_id, message_id):
+        if await handle_list_learned(text, chat_id, sender_id, message_id):
             return
-        if await handle_on(text, chat_id, sender_id, message_id):
-            return
-
-        # 🚫 اگه گروه فعال نباشه
-        if not is_group_active(chat_id):
+        if await handle_add_admin(text, chat_id, sender_id, message_id):
             return
 
-        # 💬 پاسخ با شخصیت (با ریپلای)
-        personality, _ = get_group_personality(chat_id)
-        response = find_response(text, personality)
-        if response:
-            await send_with_reply(chat_id, response, message_id)
+        # 💬 جواب به پیام
+        if reply_to_id:
+            # کسی به یه پیام ریپلای زده
+            # اگه متنش کلمه کلیدیه، جواب بده. وگرنه یه جواب بامزه بده
+            response = find_response(text)
+            if response:
+                await send_with_reply(chat_id, response, message_id)
+            else:
+                await send_with_reply(chat_id, get_reply_to_bot(), message_id)
+        else:
+            # پیام معمولی
+            response = find_response(text)
+            if response:
+                await send_with_reply(chat_id, response, message_id)
+            else:
+                # اگه کلمه رو نمی‌شناخت، یه جواب پیش‌فرض می‌ده
+                # ولی فقط با احتمال ۳۰٪، تا گروه رو شلوغ نکنه
+                if random.random() < 0.3:
+                    await send_with_reply(chat_id, get_fallback(), message_id)
 
     except Exception as e:
         print(f"❌ خطا: {e}")
@@ -374,5 +399,5 @@ async def handle_message(_bot, message):
 # اجرا
 # ==================================================
 if __name__ == "__main__":
-    print("🤖 ربات چت شخصیت‌محور v3 در حال اجراست...")
+    print("🤖 ربات دخترونه در حال اجراست...")
     bot.run()
