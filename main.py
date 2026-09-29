@@ -1,23 +1,22 @@
 # -*- coding: utf-8 -*-
 """
 🎭 ربات چت شخصیت‌محور روبیکا
-نسخه فروشگاهی - Multi-Personality Chat Bot
 """
 
 import os
 import json
 import random
-from robobot import Bot
+from rubka import Robot
 
 # ==================================================
-# تنظیمات اولیه
+# تنظیمات
 # ==================================================
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
 if not BOT_TOKEN:
     raise ValueError("توکن ربات یافت نشد!")
 
-bot = Bot(BOT_TOKEN)
+bot = Robot(token=BOT_TOKEN)
 
 CONFIG_FILE = "config.json"
 PERSONALITIES_FOLDER = "personalities"
@@ -56,11 +55,9 @@ CONFIG = load_json(CONFIG_FILE, {
     "admins": [],
     "default_personality": "friend",
     "groups": {},
-    "link_filter": True,
-    "notify_admin": True
+    "link_filter": True
 })
 
-# لود همه شخصیت‌ها
 PERSONALITIES = {}
 if os.path.exists(PERSONALITIES_FOLDER):
     for filename in os.listdir(PERSONALITIES_FOLDER):
@@ -69,8 +66,7 @@ if os.path.exists(PERSONALITIES_FOLDER):
             PERSONALITIES[name] = load_json(os.path.join(PERSONALITIES_FOLDER, filename))
 
 print(f"✅ {len(PERSONALITIES)} شخصیت لود شد")
-print(f"✅ {len(CONFIG.get('admins', []))} ادمین تنظیم شده")
-print(f"✅ {len(CONFIG.get('groups', {}))} گروه ثبت شده")
+print(f"✅ شخصیت‌ها: {list(PERSONALITIES.keys())}")
 
 
 # ==================================================
@@ -80,172 +76,136 @@ def save_config():
     save_json(CONFIG_FILE, CONFIG)
 
 
-def is_admin(chat_id):
-    """چک میکنه که کاربر ادمین هست یا نه"""
-    return str(chat_id) in [str(a) for a in CONFIG.get("admins", [])]
+def is_admin(sender_id):
+    if not sender_id:
+        return False
+    return str(sender_id) in [str(a) for a in CONFIG.get("admins", [])]
 
 
 def is_group_active(chat_id):
-    """چک میکنه که گروه فعال هست یا نه"""
     groups = CONFIG.get("groups", {})
-    if str(chat_id) not in groups:
-        return False
-    return groups[str(chat_id)].get("active", False)
+    group = groups.get(str(chat_id), {})
+    return group.get("active", False)
 
 
 def get_group_personality(chat_id):
-    """شخصیت فعال گروه رو برمی‌گردونه"""
     groups = CONFIG.get("groups", {})
-    group_data = groups.get(str(chat_id), {})
-    personality_name = group_data.get("personality", CONFIG.get("default_personality", "friend"))
-    
-    if personality_name not in PERSONALITIES:
-        # اگه شخصیت پیدا نشد، پیش‌فرض
-        personality_name = CONFIG.get("default_personality", "friend")
-    
-    return PERSONALITIES.get(personality_name, {}), personality_name
+    group = groups.get(str(chat_id), {})
+    name = group.get("personality", CONFIG.get("default_personality", "friend"))
+    if name not in PERSONALITIES:
+        name = CONFIG.get("default_personality", "friend")
+    return PERSONALITIES.get(name, {}), name
 
 
-def register_group(chat_id, personality=None):
-    """گروه جدید رو ثبت میکنه"""
+def register_group(chat_id):
     groups = CONFIG.get("groups", {})
     if str(chat_id) not in groups:
         groups[str(chat_id)] = {
-            "personality": personality or CONFIG.get("default_personality", "friend"),
+            "personality": CONFIG.get("default_personality", "friend"),
             "active": True
         }
         CONFIG["groups"] = groups
         save_config()
-        return True
-    return False
 
 
 def is_link(text):
-    """چک میکنه که متن حاوی لینک هست یا نه"""
-    link_patterns = ["http://", "https://", "t.me/", "rubika.ir/", "www.", ".com/", ".ir/", ".net/", ".org/", ".xyz/"]
+    patterns = ["http://", "https://", "t.me/", "rubika.ir/", "www."]
     text_lower = text.lower()
-    return any(p in text_lower for p in link_patterns)
+    return any(p in text_lower for p in patterns)
 
 
 def find_response(text, personality):
-    """
-    پیدا کردن پاسخ مناسب از شخصیت
-    ساختار شخصیت: {"_name": "...", "responses": {"کلمه": ["پاسخ1", "پاسخ2"]}}
-    """
     text_lower = text.lower().strip()
-    
-    # ۱. اول از responses (ساختار جدید)
     responses = personality.get("responses", {})
     if text_lower in responses:
         r = responses[text_lower]
         return random.choice(r) if isinstance(r, list) else r
-    
-    # ۲. حالت قدیمی (بدون responses)
-    for key, value in personality.items():
-        if key.startswith("_"):
-            continue
-        if text_lower == key.lower():
-            return random.choice(value) if isinstance(value, list) else value
-    
+    return None
+
+
+def get_sender_id(message):
+    """گرفتن آیدی فرستنده از ساختارهای مختلف"""
+    for attr in ['sender_id', 'author_id', 'from_id', 'sender']:
+        if hasattr(message, attr):
+            val = getattr(message, attr)
+            if val is not None:
+                return val
+    return None
+
+
+def get_chat_id(message):
+    for attr in ['chat_id', 'chat']:
+        if hasattr(message, attr):
+            val = getattr(message, attr)
+            if attr == 'chat' and hasattr(val, 'id'):
+                return val.id
+            if attr == 'chat_id':
+                return val
     return None
 
 
 # ==================================================
-# دستورات ادمین
+# دستورات
 # ==================================================
+async def handle_personality_list(text, chat_id):
+    if text not in ["/personalities", "شخصیت ها", "شخصیتها", "/list"]:
+        return False
+    
+    _, current = get_group_personality(chat_id)
+    msg = "🎭 **شخصیت‌های موجود:**\n\n"
+    for name, data in PERSONALITIES.items():
+        display = data.get("_name", name)
+        marker = "✅ " if name == current else "🔹 "
+        msg += f"{marker}{name} - {display}\n"
+    msg += "\n📝 برای فعال‌سازی: /set اسم_شخصیت"
+    await bot.send_message(chat_id, msg)
+    return True
+
+
 async def handle_set_personality(text, chat_id, sender_id):
-    """تنظیم شخصیت برای گروه: /set اسم_شخصیت"""
+    if not text.startswith("/set"):
+        return False
+    
     if not is_admin(sender_id):
         await bot.send_message(chat_id, "❌ فقط ادمین می‌تونه شخصیت رو تغییر بده!")
         return True
     
     parts = text.split(maxsplit=1)
     if len(parts) < 2:
-        available = "\n".join([f"🔹 {name}" for name in PERSONALITIES.keys()])
+        available = ", ".join(PERSONALITIES.keys())
         await bot.send_message(chat_id, f"📝 فرمت: /set اسم_شخصیت\n\n🎭 شخصیت‌ها:\n{available}")
         return True
     
-    personality_name = parts[1].strip().lower()
-    if personality_name not in PERSONALITIES:
-        available = "\n".join([f"🔹 {name}" for name in PERSONALITIES.keys()])
+    name = parts[1].strip().lower()
+    if name not in PERSONALITIES:
+        available = ", ".join(PERSONALITIES.keys())
         await bot.send_message(chat_id, f"❌ شخصیت پیدا نشد!\n\n🎭 شخصیت‌ها:\n{available}")
         return True
     
-    # ثبت گروه اگه جدید باشه
     register_group(chat_id)
-    
-    # تغییر شخصیت
-    CONFIG["groups"][str(chat_id)]["personality"] = personality_name
+    CONFIG["groups"][str(chat_id)]["personality"] = name
     CONFIG["groups"][str(chat_id)]["active"] = True
     save_config()
     
-    display_name = PERSONALITIES[personality_name].get("_name", personality_name)
-    await bot.send_message(chat_id, f"✅ شخصیت فعال شد: «{display_name}» 🎭")
-    return True
-
-
-async def handle_personality_list(text, chat_id):
-    """لیست شخصیت‌ها: /personalities یا «شخصیت ها»"""
-    if text not in ["/personalities", "شخصیت ها", "شخصیتها", "/list"]:
-        return False
-    
-    _, current_name = get_group_personality(chat_id)
-    
-    msg = "🎭 **شخصیت‌های موجود:**\n\n"
-    for name, data in PERSONALITIES.items():
-        display = data.get("_name", name)
-        desc = data.get("_description", "")
-        marker = "✅ " if name == current_name else "🔹 "
-        msg += f"{marker}**{name}** - {display}\n"
-        if desc:
-            msg += f"   _{desc}_\n"
-    
-    msg += "\n📝 برای فعال‌سازی: /set اسم_شخصیت"
-    await bot.send_message(chat_id, msg)
+    display = PERSONALITIES[name].get("_name", name)
+    await bot.send_message(chat_id, f"✅ شخصیت فعال شد: {display} 🎭")
     return True
 
 
 async def handle_current(text, chat_id):
-    """شخصیت فعلی: /current"""
     if text != "/current":
         return False
-    
-    personality, name = get_group_personality(chat_id)
-    display = personality.get("_name", name)
-    await bot.send_message(chat_id, f"🎭 شخصیت فعلی این گروه: **{display}**")
-    return True
-
-
-async def handle_admin_help(text, chat_id, sender_id):
-    """راهنما: /help"""
-    if text != "/help":
-        return False
-    
-    help_text = (
-        "📚 **راهنمای ربات چت**\n\n"
-        "🎭 **دستورات ادمین:**\n"
-        "`/set اسم_شخصیت` - فعال‌سازی شخصیت\n"
-        "`/personalities` - لیست شخصیت‌ها\n"
-        "`/current` - شخصیت فعلی\n"
-        "`/off` - خاموش کردن ربات در گروه\n"
-        "`/on` - روشن کردن ربات در گروه\n\n"
-        "🎭 **برای دیدن شخصیت‌ها بنویسید:**\n"
-        "`شخصیت ها`"
-    )
-    
-    if is_admin(sender_id):
-        await bot.send_message(chat_id, help_text)
+    _, name = get_group_personality(chat_id)
+    display = PERSONALITIES.get(name, {}).get("_name", name)
+    await bot.send_message(chat_id, f"🎭 شخصیت فعلی: {display}")
     return True
 
 
 async def handle_off(text, chat_id, sender_id):
-    """خاموش کردن ربات: /off"""
     if text != "/off":
         return False
-    
     if not is_admin(sender_id):
         return True
-    
     register_group(chat_id)
     CONFIG["groups"][str(chat_id)]["active"] = False
     save_config()
@@ -254,13 +214,10 @@ async def handle_off(text, chat_id, sender_id):
 
 
 async def handle_on(text, chat_id, sender_id):
-    """روشن کردن ربات: /on"""
     if text != "/on":
         return False
-    
     if not is_admin(sender_id):
         return True
-    
     register_group(chat_id)
     CONFIG["groups"][str(chat_id)]["active"] = True
     save_config()
@@ -268,39 +225,50 @@ async def handle_on(text, chat_id, sender_id):
     return True
 
 
+async def handle_help(text, chat_id, sender_id):
+    if text != "/help":
+        return False
+    if not is_admin(sender_id):
+        return True
+    msg = (
+        "📚 راهنمای ربات\n\n"
+        "🎭 /set اسم_شخصیت - فعال‌سازی\n"
+        "📋 /personalities - لیست شخصیت‌ها\n"
+        "👤 /current - شخصیت فعلی\n"
+        "🔴 /off - خاموش کردن\n"
+        "🟢 /on - روشن کردن\n\n"
+        "برای لیست شخصیت‌ها بنویس: شخصیت ها"
+    )
+    await bot.send_message(chat_id, msg)
+    return True
+
+
 # ==================================================
 # هندلر اصلی
 # ==================================================
 @bot.on_message()
-async def handle_message(bot, message):
+async def handle_message(_bot, message):
     try:
-        chat_id = message.chat_id if hasattr(message, 'chat_id') else None
+        chat_id = get_chat_id(message)
         if chat_id is None:
             return
         
-        # گرفتن آیدی فرستنده (اگه موجود باشه)
-        sender_id = None
-        if hasattr(message, 'sender_id'):
-            sender_id = message.sender_id
-        elif hasattr(message, 'author_id'):
-            sender_id = message.author_id
-        elif hasattr(message, 'from_id'):
-            sender_id = message.from_id
+        sender_id = get_sender_id(message)
         
         text = message.text.strip() if hasattr(message, 'text') and message.text else None
         if not text:
             return
         
-        # 🔗 فیلتر لینک (اگه گروه فعال باشه)
+        # 🔗 فیلتر لینک
         if CONFIG.get("link_filter") and is_group_active(chat_id) and is_link(text):
             try:
                 await bot.delete_message(chat_id, message.id)
             except Exception as e:
-                print(f"⚠️ خطا در پاک کردن لینک: {e}")
+                print(f"⚠️ خطا در حذف لینک: {e}")
             return
         
-        # 🎯 دستورات ادمین
-        if await handle_help_command(text, chat_id, sender_id):
+        # 🎯 دستورات
+        if await handle_help(text, chat_id, sender_id):
             return
         if await handle_personality_list(text, chat_id):
             return
@@ -313,11 +281,11 @@ async def handle_message(bot, message):
         if await handle_on(text, chat_id, sender_id):
             return
         
-        # 🚫 اگه گروه فعال نباشه، جواب نده
+        # 🚫 اگه گروه فعال نباشه
         if not is_group_active(chat_id):
             return
         
-        # 💬 پاسخ با شخصیت فعال
+        # 💬 پاسخ با شخصیت
         personality, _ = get_group_personality(chat_id)
         response = find_response(text, personality)
         if response:
@@ -335,4 +303,3 @@ async def handle_message(bot, message):
 if __name__ == "__main__":
     print("🤖 ربات چت شخصیت‌محور در حال اجراست...")
     bot.run()
-
