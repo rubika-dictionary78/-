@@ -1,0 +1,12 @@
+{
+  "admins": ["g0IQuNo0f4ec37cefb64dd0210a5aa5f"],
+  "default_personality": "friend",
+  "groups": {
+    "g0IQuNo0f4ec37cefb64dd0210a5aa5f": {
+      "personality": "friend",
+      "active": true
+    }
+  },
+  "link_filter": true,
+  "notify_admin": true
+}
