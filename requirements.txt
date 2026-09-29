@@ -1,4 +1,1 @@
-robobot-rubika
-Pillow
-requests
-gtts
+robobot
