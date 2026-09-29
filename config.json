@@ -1,5 +1,7 @@
 {
-  "admins": ["g0IQuNo0f4ec37cefb64dd0210a5aa5f"],
+  "admins": [
+    "u0Iopfm0841d28cb88ee368ba5f966b6"
+  ],
   "default_personality": "friend",
   "groups": {
     "g0IQuNo0f4ec37cefb64dd0210a5aa5f": {
@@ -7,6 +9,5 @@
       "active": true
     }
   },
-  "link_filter": true,
-  "notify_admin": true
+  "link_filter": true
 }
