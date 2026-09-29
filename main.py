@@ -20,6 +20,8 @@ bot = Robot(token=BOT_TOKEN)
 
 CONFIG_FILE = "config.json"
 PERSONALITIES_FOLDER = "personalities"
+HANDLED_FILE = "handled_messages.json"
+MAX_HANDLED = 100
 
 
 # ==================================================
@@ -46,6 +48,29 @@ def save_json(filename, data):
     except Exception as e:
         print(f"خطا در ذخیره {filename}: {e}")
         return False
+
+
+def load_handled():
+    data = load_json(HANDLED_FILE, [])
+    return data if isinstance(data, list) else []
+
+
+def save_handled(data):
+    save_json(HANDLED_FILE, data[-MAX_HANDLED:])
+
+
+HANDLED_MESSAGES = load_handled()
+
+
+def is_duplicate(message_id):
+    """چک میکنه که پیام تکراریه یا نه"""
+    if message_id is None:
+        return False
+    if message_id in HANDLED_MESSAGES:
+        return True
+    HANDLED_MESSAGES.append(message_id)
+    save_handled(HANDLED_MESSAGES)
+    return False
 
 
 # ==================================================
@@ -124,7 +149,7 @@ def find_response(text, personality):
 
 
 def get_sender_id(message):
-    """گرفتن آیدی فرستنده از ساختارهای مختلف"""
+    """گرفتن آیدی فرستنده"""
     for attr in ['sender_id', 'author_id', 'from_id', 'sender']:
         if hasattr(message, attr):
             val = getattr(message, attr)
@@ -134,12 +159,23 @@ def get_sender_id(message):
 
 
 def get_chat_id(message):
+    """گرفتن آیدی چت"""
     for attr in ['chat_id', 'chat']:
         if hasattr(message, attr):
             val = getattr(message, attr)
             if attr == 'chat' and hasattr(val, 'id'):
                 return val.id
             if attr == 'chat_id':
+                return val
+    return None
+
+
+def get_message_id(message):
+    """گرفتن آیدی پیام"""
+    for attr in ['id', 'message_id']:
+        if hasattr(message, attr):
+            val = getattr(message, attr)
+            if val is not None:
                 return val
     return None
 
@@ -253,6 +289,12 @@ async def handle_message(_bot, message):
         if chat_id is None:
             return
         
+        # 🚫 چک کردن پیام تکراری
+        message_id = get_message_id(message)
+        if is_duplicate(message_id):
+            print(f"⚠️ پیام تکراری نادیده گرفته شد: {message_id}")
+            return
+        
         sender_id = get_sender_id(message)
         
         text = message.text.strip() if hasattr(message, 'text') and message.text else None
@@ -262,7 +304,7 @@ async def handle_message(_bot, message):
         # 🔗 فیلتر لینک
         if CONFIG.get("link_filter") and is_group_active(chat_id) and is_link(text):
             try:
-                await bot.delete_message(chat_id, message.id)
+                await bot.delete_message(chat_id, message_id)
             except Exception as e:
                 print(f"⚠️ خطا در حذف لینک: {e}")
             return
