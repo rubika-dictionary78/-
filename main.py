@@ -6,6 +6,7 @@
 import os
 import json
 import random
+import time
 from rubka import Robot
 
 # ==================================================
@@ -20,8 +21,9 @@ bot = Robot(token=BOT_TOKEN)
 
 CONFIG_FILE = "config.json"
 PERSONALITIES_FOLDER = "personalities"
-HANDLED_FILE = "handled_messages.json"
-MAX_HANDLED = 100
+
+# حافظه موقت برای جلوگیری از تکرار
+RECENT_MESSAGES = {}
 
 
 # ==================================================
@@ -50,26 +52,24 @@ def save_json(filename, data):
         return False
 
 
-def load_handled():
-    data = load_json(HANDLED_FILE, [])
-    return data if isinstance(data, list) else []
-
-
-def save_handled(data):
-    save_json(HANDLED_FILE, data[-MAX_HANDLED:])
-
-
-HANDLED_MESSAGES = load_handled()
-
-
-def is_duplicate(message_id):
-    """چک میکنه که پیام تکراریه یا نه"""
-    if message_id is None:
-        return False
-    if message_id in HANDLED_MESSAGES:
+def is_duplicate(chat_id, text):
+    """چک میکنه که همین متن توی ۱۰ ثانیه اخیر اومده یا نه"""
+    now = time.time()
+    chat_key = str(chat_id)
+    
+    if chat_key not in RECENT_MESSAGES:
+        RECENT_MESSAGES[chat_key] = {}
+    
+    # پاک کردن پیام‌های قدیمی
+    RECENT_MESSAGES[chat_key] = {
+        t: ts for t, ts in RECENT_MESSAGES[chat_key].items()
+        if now - ts < 10
+    }
+    
+    if text in RECENT_MESSAGES[chat_key]:
         return True
-    HANDLED_MESSAGES.append(message_id)
-    save_handled(HANDLED_MESSAGES)
+    
+    RECENT_MESSAGES[chat_key][text] = now
     return False
 
 
@@ -149,7 +149,6 @@ def find_response(text, personality):
 
 
 def get_sender_id(message):
-    """گرفتن آیدی فرستنده"""
     for attr in ['sender_id', 'author_id', 'from_id', 'sender']:
         if hasattr(message, attr):
             val = getattr(message, attr)
@@ -159,7 +158,6 @@ def get_sender_id(message):
 
 
 def get_chat_id(message):
-    """گرفتن آیدی چت"""
     for attr in ['chat_id', 'chat']:
         if hasattr(message, attr):
             val = getattr(message, attr)
@@ -171,7 +169,6 @@ def get_chat_id(message):
 
 
 def get_message_id(message):
-    """گرفتن آیدی پیام"""
     for attr in ['id', 'message_id']:
         if hasattr(message, attr):
             val = getattr(message, attr)
@@ -180,10 +177,21 @@ def get_message_id(message):
     return None
 
 
+async def send_with_reply(chat_id, text, message_id):
+    """ارسال پیام با ریپلای (اگه ممکن باشه)"""
+    try:
+        await bot.send_message(chat_id, text, reply_to_message_id=message_id)
+    except Exception:
+        try:
+            await bot.send_message(chat_id, text, reply_to=message_id)
+        except Exception:
+            await bot.send_message(chat_id, text)
+
+
 # ==================================================
 # دستورات
 # ==================================================
-async def handle_personality_list(text, chat_id):
+async def handle_personality_list(text, chat_id, message_id):
     if text not in ["/personalities", "شخصیت ها", "شخصیتها", "/list"]:
         return False
     
@@ -194,28 +202,28 @@ async def handle_personality_list(text, chat_id):
         marker = "✅ " if name == current else "🔹 "
         msg += f"{marker}{name} - {display}\n"
     msg += "\n📝 برای فعال‌سازی: /set اسم_شخصیت"
-    await bot.send_message(chat_id, msg)
+    await send_with_reply(chat_id, msg, message_id)
     return True
 
 
-async def handle_set_personality(text, chat_id, sender_id):
+async def handle_set_personality(text, chat_id, sender_id, message_id):
     if not text.startswith("/set"):
         return False
     
     if not is_admin(sender_id):
-        await bot.send_message(chat_id, "❌ فقط ادمین می‌تونه شخصیت رو تغییر بده!")
+        await send_with_reply(chat_id, "❌ فقط ادمین می‌تونه شخصیت رو تغییر بده!", message_id)
         return True
     
     parts = text.split(maxsplit=1)
     if len(parts) < 2:
         available = ", ".join(PERSONALITIES.keys())
-        await bot.send_message(chat_id, f"📝 فرمت: /set اسم_شخصیت\n\n🎭 شخصیت‌ها:\n{available}")
+        await send_with_reply(chat_id, f"📝 فرمت: /set اسم_شخصیت\n\n🎭 شخصیت‌ها:\n{available}", message_id)
         return True
     
     name = parts[1].strip().lower()
     if name not in PERSONALITIES:
         available = ", ".join(PERSONALITIES.keys())
-        await bot.send_message(chat_id, f"❌ شخصیت پیدا نشد!\n\n🎭 شخصیت‌ها:\n{available}")
+        await send_with_reply(chat_id, f"❌ شخصیت پیدا نشد!\n\n🎭 شخصیت‌ها:\n{available}", message_id)
         return True
     
     register_group(chat_id)
@@ -224,20 +232,20 @@ async def handle_set_personality(text, chat_id, sender_id):
     save_config()
     
     display = PERSONALITIES[name].get("_name", name)
-    await bot.send_message(chat_id, f"✅ شخصیت فعال شد: {display} 🎭")
+    await send_with_reply(chat_id, f"✅ شخصیت فعال شد: {display} 🎭", message_id)
     return True
 
 
-async def handle_current(text, chat_id):
+async def handle_current(text, chat_id, message_id):
     if text != "/current":
         return False
     _, name = get_group_personality(chat_id)
     display = PERSONALITIES.get(name, {}).get("_name", name)
-    await bot.send_message(chat_id, f"🎭 شخصیت فعلی: {display}")
+    await send_with_reply(chat_id, f"🎭 شخصیت فعلی: {display}", message_id)
     return True
 
 
-async def handle_off(text, chat_id, sender_id):
+async def handle_off(text, chat_id, sender_id, message_id):
     if text != "/off":
         return False
     if not is_admin(sender_id):
@@ -245,11 +253,11 @@ async def handle_off(text, chat_id, sender_id):
     register_group(chat_id)
     CONFIG["groups"][str(chat_id)]["active"] = False
     save_config()
-    await bot.send_message(chat_id, "🔴 ربات خاموش شد.")
+    await send_with_reply(chat_id, "🔴 ربات خاموش شد.", message_id)
     return True
 
 
-async def handle_on(text, chat_id, sender_id):
+async def handle_on(text, chat_id, sender_id, message_id):
     if text != "/on":
         return False
     if not is_admin(sender_id):
@@ -257,11 +265,11 @@ async def handle_on(text, chat_id, sender_id):
     register_group(chat_id)
     CONFIG["groups"][str(chat_id)]["active"] = True
     save_config()
-    await bot.send_message(chat_id, "🟢 ربات روشن شد.")
+    await send_with_reply(chat_id, "🟢 ربات روشن شد.", message_id)
     return True
 
 
-async def handle_help(text, chat_id, sender_id):
+async def handle_help(text, chat_id, sender_id, message_id):
     if text != "/help":
         return False
     if not is_admin(sender_id):
@@ -275,7 +283,7 @@ async def handle_help(text, chat_id, sender_id):
         "🟢 /on - روشن کردن\n\n"
         "برای لیست شخصیت‌ها بنویس: شخصیت ها"
     )
-    await bot.send_message(chat_id, msg)
+    await send_with_reply(chat_id, msg, message_id)
     return True
 
 
@@ -289,17 +297,17 @@ async def handle_message(_bot, message):
         if chat_id is None:
             return
         
-        # 🚫 چک کردن پیام تکراری
-        message_id = get_message_id(message)
-        if is_duplicate(message_id):
-            print(f"⚠️ پیام تکراری نادیده گرفته شد: {message_id}")
-            return
-        
-        sender_id = get_sender_id(message)
-        
         text = message.text.strip() if hasattr(message, 'text') and message.text else None
         if not text:
             return
+        
+        # 🚫 چک کردن پیام تکراری
+        if is_duplicate(chat_id, text):
+            print(f"⚠️ پیام تکراری نادیده گرفته شد: {text[:30]}")
+            return
+        
+        sender_id = get_sender_id(message)
+        message_id = get_message_id(message)
         
         # 🔗 فیلتر لینک
         if CONFIG.get("link_filter") and is_group_active(chat_id) and is_link(text):
@@ -310,28 +318,28 @@ async def handle_message(_bot, message):
             return
         
         # 🎯 دستورات
-        if await handle_help(text, chat_id, sender_id):
+        if await handle_help(text, chat_id, sender_id, message_id):
             return
-        if await handle_personality_list(text, chat_id):
+        if await handle_personality_list(text, chat_id, message_id):
             return
-        if await handle_set_personality(text, chat_id, sender_id):
+        if await handle_set_personality(text, chat_id, sender_id, message_id):
             return
-        if await handle_current(text, chat_id):
+        if await handle_current(text, chat_id, message_id):
             return
-        if await handle_off(text, chat_id, sender_id):
+        if await handle_off(text, chat_id, sender_id, message_id):
             return
-        if await handle_on(text, chat_id, sender_id):
+        if await handle_on(text, chat_id, sender_id, message_id):
             return
         
         # 🚫 اگه گروه فعال نباشه
         if not is_group_active(chat_id):
             return
         
-        # 💬 پاسخ با شخصیت
+        # 💬 پاسخ با شخصیت (با ریپلای)
         personality, _ = get_group_personality(chat_id)
         response = find_response(text, personality)
         if response:
-            await bot.send_message(chat_id, response)
+            await send_with_reply(chat_id, response, message_id)
     
     except Exception as e:
         print(f"❌ خطا: {e}")
