@@ -335,3 +335,4 @@ async def handle_message(bot, message):
 if __name__ == "__main__":
     print("🤖 ربات چت شخصیت‌محور در حال اجراست...")
     bot.run()
+
