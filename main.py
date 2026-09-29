@@ -254,7 +254,6 @@ async def handle_message(_bot, message):
             return
         
         sender_id = get_sender_id(message)
-        print(f"🔍 SENDER ID: {sender_id}")
         
         text = message.text.strip() if hasattr(message, 'text') and message.text else None
         if not text:
